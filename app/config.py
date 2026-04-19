@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     min_confidence: float = 0.65
     max_daily_loss_usd: float = 100.0
     min_market_volume: float = 5000.0
-    initial_bankroll_usd: float = 1000.0
+    initial_bankroll_usd: float = 50.0
     user_language: str = "ru"
 
     polymarket_events_url: str = "https://gamma-api.polymarket.com/events"

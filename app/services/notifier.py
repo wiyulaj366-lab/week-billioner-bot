@@ -76,6 +76,8 @@ class TelegramNotifier:
             f"Источник: {event.source}",
             f"Ссылка: {event.url}",
             f"Приоритет: {analysis.packet.priority_score:.2f} ({analysis.packet.priority_reason})",
+            f"Почему предложено: {analysis.packet.priority_reason}. "
+            f"Сигнал сформирован по совпадению новости с рынком и риск-фильтрам.",
             f"Рынок: {market}",
             f"Сторона: {side}",
             f"Ставка: ${decision.stake_usd:.2f}",

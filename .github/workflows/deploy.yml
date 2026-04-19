@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: week-billioner-bot-deploy
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: [self-hosted, Linux, X64, weekbot]
@@ -29,4 +33,4 @@ jobs:
             echo "Missing $APP_DIR/.env. Create it once on server."
             exit 1
           fi
-          docker compose up -d --build
+          docker compose up -d --build --force-recreate --remove-orphans
