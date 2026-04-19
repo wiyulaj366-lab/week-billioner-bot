@@ -126,19 +126,15 @@ Examples:
 
 Implemented workflows:
 - `.github/workflows/ci.yml` - dependency install + import smoke test.
-- `.github/workflows/deploy.yml` - copy code to server via SCP + `docker compose up -d --build`.
-
-Repository secrets required:
-- `DEPLOY_HOST` (example: `2.26.61.97`)
-- `DEPLOY_USER` (example: `root`)
-- `DEPLOY_PASSWORD` (server password)
+- `.github/workflows/deploy.yml` - run deploy directly on self-hosted runner (`weekbot` label) using `docker compose up -d --build`.
 
 Server requirements:
 - Docker + Docker Compose installed.
 - `/opt/week-billioner-bot/.env` present with your runtime secrets.
+- GitHub self-hosted runner installed and online on the same server.
 
 Deployment flow:
 1. Push to `main`.
-2. GitHub Actions copies app files to `/opt/week-billioner-bot`.
-3. Deploy job SSHes into server and runs `docker compose up -d --build`.
+2. GitHub Actions schedules `Deploy To Server` on self-hosted runner.
+3. Runner syncs code to `/opt/week-billioner-bot` and runs `docker compose up -d --build`.
 

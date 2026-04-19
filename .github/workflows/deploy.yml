@@ -8,35 +8,25 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, weekbot]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Upload project to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
-          source: "app,requirements.txt,Dockerfile,docker-compose.yml,.env.example,README.md"
-          target: "/opt/week-billioner-bot"
-          strip_components: 0
-          overwrite: true
-
       - name: Build and run on server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
-          script: |
-            set -e
-            APP_DIR=/opt/week-billioner-bot
-            mkdir -p "$APP_DIR/data"
-            cd "$APP_DIR"
-            if [ ! -f .env ]; then
-              echo "Missing $APP_DIR/.env. Create it once on server."
-              exit 1
-            fi
-            docker compose up -d --build
+        run: |
+          set -euo pipefail
+          APP_DIR=/opt/week-billioner-bot
+          mkdir -p "$APP_DIR/data"
+          rsync -av --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'data' \
+            --exclude '.env' \
+            ./ "$APP_DIR"/
+          cd "$APP_DIR"
+          if [ ! -f .env ]; then
+            echo "Missing $APP_DIR/.env. Create it once on server."
+            exit 1
+          fi
+          docker compose up -d --build
