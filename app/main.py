@@ -71,7 +71,12 @@ async def on_startup() -> None:
     decision = DecisionService(settings, storage, runtime_config)
     execution = ExecutionService(settings, runtime_config)
     notifier = TelegramNotifier(settings, runtime_config)
-    admin_bot = TelegramAdminBot(settings=settings, runtime_config=runtime_config)
+    admin_bot = TelegramAdminBot(
+        settings=settings,
+        runtime_config=runtime_config,
+        storage=storage,
+        execution=execution,
+    )
 
     pipeline = TradingPipeline(
         settings=settings,
@@ -81,6 +86,7 @@ async def on_startup() -> None:
         decision=decision,
         execution=execution,
         notifier=notifier,
+        runtime_config=runtime_config,
     )
 
     scheduler.add_job(_run_pipeline_job, "interval", seconds=settings.poll_interval_seconds, id="poll-cycle")

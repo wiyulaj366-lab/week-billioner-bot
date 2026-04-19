@@ -36,11 +36,20 @@ class Settings(BaseSettings):
     min_confidence: float = 0.65
     max_daily_loss_usd: float = 100.0
     min_market_volume: float = 5000.0
+    initial_bankroll_usd: float = 1000.0
+    user_language: str = "ru"
 
     polymarket_events_url: str = "https://gamma-api.polymarket.com/events"
     world_feeds: str = (
         "https://feeds.bbci.co.uk/news/world/rss.xml,"
-        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
+        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml,"
+        "https://www.aljazeera.com/xml/rss/all.xml,"
+        "https://www.coindesk.com/arc/outboundfeeds/rss/,"
+        "https://cointelegraph.com/rss,"
+        "https://www.kyivpost.com/feed,"
+        "https://www.theguardian.com/world/rss,"
+        "https://www.reutersagency.com/feed/?best-topics=world&post_type=best,"
+        "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best"
     )
 
     llm_1_name: str = "ModelA"

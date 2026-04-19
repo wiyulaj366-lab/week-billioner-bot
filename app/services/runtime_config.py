@@ -32,6 +32,8 @@ class RuntimeSnapshot:
     min_confidence: float
     max_daily_loss_usd: float
     min_market_volume: float
+    initial_bankroll_usd: float
+    user_language: str
     telegram_bot_token: str
     telegram_chat_id: str
     llms: list[LLMConfig]
@@ -64,6 +66,10 @@ class RuntimeConfigService:
             min_confidence=_to_float(o.get("MIN_CONFIDENCE"), self.settings.min_confidence),
             max_daily_loss_usd=_to_float(o.get("MAX_DAILY_LOSS_USD"), self.settings.max_daily_loss_usd),
             min_market_volume=_to_float(o.get("MIN_MARKET_VOLUME"), self.settings.min_market_volume),
+            initial_bankroll_usd=_to_float(
+                o.get("INITIAL_BANKROLL_USD"), self.settings.initial_bankroll_usd
+            ),
+            user_language=str(o.get("USER_LANGUAGE", self.settings.user_language)).strip().lower(),
             telegram_bot_token=o.get("TELEGRAM_BOT_TOKEN", self.settings.telegram_bot_token),
             telegram_chat_id=o.get("TELEGRAM_CHAT_ID", self.settings.telegram_chat_id),
             llms=llms,

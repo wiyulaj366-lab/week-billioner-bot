@@ -11,14 +11,14 @@ class ExecutionService:
     async def execute(self, decision: Decision) -> ExecutionResult:
         runtime = await self.runtime_config.snapshot()
         if decision.action == "SKIP":
-            return ExecutionResult(simulated=True, success=True, message="No trade executed (SKIP).")
+            return ExecutionResult(simulated=True, success=True, message="Сделка не выполнена (SKIP).")
 
         if runtime.dry_run or not runtime.auto_execute:
             return ExecutionResult(
                 simulated=True,
                 success=True,
                 order_id="simulated-order",
-                message=f"DRY_RUN: would execute {decision.action} with ${decision.stake_usd:.2f}",
+                message=f"DRY_RUN: была бы выполнена {decision.action} на ${decision.stake_usd:.2f}",
             )
 
         # Live execution adapter placeholder.
@@ -26,5 +26,5 @@ class ExecutionService:
         return ExecutionResult(
             simulated=False,
             success=False,
-            message="Live execution not implemented. Keep DRY_RUN=true until CLOB signer is added.",
+            message="Live-исполнение еще не реализовано. Оставь DRY_RUN=true до подключения кошелька.",
         )

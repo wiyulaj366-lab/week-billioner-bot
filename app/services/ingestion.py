@@ -5,6 +5,43 @@ from app.services.polymarket import PolymarketClient
 from app.services.storage import Storage
 from app.services.world_events import WorldEventsClient
 
+CRYPTO_KEYWORDS = {
+    "bitcoin",
+    "btc",
+    "ethereum",
+    "eth",
+    "crypto",
+    "cryptocurrency",
+    "stablecoin",
+    "binance",
+    "sec",
+    "etf",
+    "token",
+    "blockchain",
+    "defi",
+    "coinbase",
+    "altcoin",
+}
+
+MACRO_RISK_KEYWORDS = {
+    "war",
+    "ukraine",
+    "russia",
+    "israel",
+    "iran",
+    "gaza",
+    "nato",
+    "sanctions",
+    "oil",
+    "inflation",
+    "fed",
+    "rate",
+    "recession",
+    "conflict",
+    "military",
+    "missile",
+}
+
 
 class IngestionService:
     def __init__(self, world_client: WorldEventsClient, polymarket_client: PolymarketClient, storage: Storage):
@@ -14,18 +51,27 @@ class IngestionService:
 
     async def collect_event_packets(self, max_events: int) -> list[EventPacket]:
         world_events = await self.world_client.fetch_latest()
-        markets = await self.polymarket_client.fetch_open_markets(limit=100)
+        markets = await self.polymarket_client.fetch_open_markets(limit=150)
 
         packets: list[EventPacket] = []
         for event in world_events:
             if await self.storage.is_processed(event.url):
                 continue
             matched = self._match_markets(event, markets)
-            if matched:
-                packets.append(EventPacket(world_event=event, candidate_markets=matched[:3]))
-            if len(packets) >= max_events:
-                break
-        return packets
+            if not matched:
+                continue
+            score, reason = self._priority_score(event, matched[0])
+            packets.append(
+                EventPacket(
+                    world_event=event,
+                    candidate_markets=matched[:5],
+                    priority_score=score,
+                    priority_reason=reason,
+                )
+            )
+
+        packets.sort(key=lambda p: p.priority_score, reverse=True)
+        return packets[:max_events]
 
     def _match_markets(self, event: WorldEvent, markets: list[PolymarketMarket]) -> list[PolymarketMarket]:
         text = f"{event.title} {event.summary}".lower()
@@ -33,18 +79,40 @@ class IngestionService:
         if not event_tokens:
             return []
 
-        scored: list[tuple[int, PolymarketMarket]] = []
+        scored: list[tuple[float, PolymarketMarket]] = []
         for market in markets:
             market_tokens = self._keywords(market.question.lower())
             overlap = len(event_tokens.intersection(market_tokens))
-            if overlap > 0:
-                scored.append((overlap, market))
+            if overlap <= 0:
+                continue
+            market_boost = min(market.volume_usd / 10000.0, 3.0) + min(market.liquidity_usd / 10000.0, 2.0)
+            scored.append((overlap + market_boost, market))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [market for _, market in scored]
 
+    def _priority_score(self, event: WorldEvent, top_market: PolymarketMarket) -> tuple[float, str]:
+        text = f"{event.title} {event.summary}".lower()
+        tokens = self._keywords(text)
+        crypto_hits = len(tokens.intersection(CRYPTO_KEYWORDS))
+        macro_hits = len(tokens.intersection(MACRO_RISK_KEYWORDS))
+
+        score = 0.0
+        score += crypto_hits * 1.8
+        score += macro_hits * 0.9
+        score += min(top_market.volume_usd / 15000.0, 2.5)
+        score += min(top_market.liquidity_usd / 15000.0, 1.5)
+
+        if crypto_hits > 0:
+            reason = "Прямой крипто-триггер"
+        elif macro_hits > 0:
+            reason = "Макро/геополитический риск для крипто"
+        else:
+            reason = "Базовое совпадение с рынком"
+        return score, reason
+
     @staticmethod
     def _keywords(text: str) -> set[str]:
-        tokens = re.findall(r"[a-zA-Z]{4,}", text)
+        tokens = re.findall(r"[a-zA-Z]{3,}", text)
         stopwords = {
             "will",
             "that",
@@ -64,5 +132,9 @@ class IngestionService:
             "world",
             "could",
             "than",
+            "said",
+            "says",
+            "into",
+            "over",
         }
         return {t for t in tokens if t not in stopwords}

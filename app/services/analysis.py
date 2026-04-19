@@ -28,7 +28,7 @@ class AnalysisService:
             outputs = [
                 ModelAnalysis(
                     model_name="fallback",
-                    thesis="No active LLM configured; cannot infer directional edge.",
+                    thesis="LLM не настроены, невозможно оценить направленное преимущество.",
                     probability_shift=0.0,
                     confidence=0.0,
                     risks=["no_models_configured"],
@@ -97,7 +97,7 @@ class AnalysisService:
             logger.exception("LLM analysis failed for %s: %s", llm.name, exc)
             return ModelAnalysis(
                 model_name=llm.name,
-                thesis=f"Model error: {type(exc).__name__}",
+                thesis=f"Ошибка модели: {type(exc).__name__}",
                 probability_shift=0.0,
                 confidence=0.0,
                 risks=["model_error"],

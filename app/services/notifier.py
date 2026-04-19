@@ -14,55 +14,101 @@ class TelegramNotifier:
         self.settings = settings
         self.runtime_config = runtime_config
 
-    async def notify(
+    async def notify_actionable(
         self,
         analysis: AggregatedAnalysis,
         decision: Decision,
         execution: ExecutionResult,
+        decision_id: int,
+        require_confirmation: bool,
     ) -> None:
-        runtime = await self.runtime_config.snapshot()
-        if not runtime.telegram_bot_token or not runtime.telegram_chat_id:
+        if decision.action == "SKIP":
             return
-        text = self._build_message(analysis, decision, execution)
-        url = f"https://api.telegram.org/bot{runtime.telegram_bot_token}/sendMessage"
-        payload = {
-            "chat_id": runtime.telegram_chat_id,
-            "text": text,
+
+        runtime = await self.runtime_config.snapshot()
+        token = self.settings.admin_telegram_bot_token or runtime.telegram_bot_token
+        chat_id = runtime.telegram_chat_id
+        if not token or not chat_id:
+            return
+
+        is_ru = runtime.user_language.startswith("ru")
+        text = self._build_message_ru(analysis, decision, execution, require_confirmation)
+        if not is_ru:
+            text = self._build_message_en(analysis, decision, execution, require_confirmation)
+
+        payload: dict = {
+            "chat_id": chat_id,
+            "text": text[:3900],
             "disable_web_page_preview": True,
         }
+        if require_confirmation:
+            payload["reply_markup"] = {
+                "inline_keyboard": [
+                    [
+                        {"text": "Отклонить", "callback_data": f"decision:reject:{decision_id}"},
+                        {"text": "Поставить", "callback_data": f"decision:approve:{decision_id}"},
+                    ]
+                ]
+            }
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()
         except Exception as exc:
-            logger.exception("Telegram notify failed: %s", exc)
+            logger.exception("Telegram actionable notify failed: %s", exc)
 
-    def _build_message(
-        self,
+    @staticmethod
+    def _build_message_ru(
         analysis: AggregatedAnalysis,
         decision: Decision,
         execution: ExecutionResult,
+        require_confirmation: bool,
     ) -> str:
         event = analysis.packet.world_event
         market = decision.market.question if decision.market else "N/A"
+        side = "ДА" if decision.action == "BET_YES" else "НЕТ"
+        mode_text = "Требуется подтверждение" if require_confirmation else "Автоисполнение включено"
         lines = [
-            "week-billioner-bot alert",
+            "Сигнал для ставки (Polymarket-style)",
+            f"Событие: {event.title}",
+            f"Источник: {event.source}",
+            f"Ссылка: {event.url}",
+            f"Приоритет: {analysis.packet.priority_score:.2f} ({analysis.packet.priority_reason})",
+            f"Рынок: {market}",
+            f"Сторона: {side}",
+            f"Ставка: ${decision.stake_usd:.2f}",
+            f"Уверенность: {decision.confidence:.2f}",
+            f"Обоснование: {decision.rationale}",
+            f"Статус исполнения: {execution.message}",
+            f"Режим: {mode_text}",
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_message_en(
+        analysis: AggregatedAnalysis,
+        decision: Decision,
+        execution: ExecutionResult,
+        require_confirmation: bool,
+    ) -> str:
+        event = analysis.packet.world_event
+        market = decision.market.question if decision.market else "N/A"
+        side = "YES" if decision.action == "BET_YES" else "NO"
+        mode_text = "Manual confirmation required" if require_confirmation else "Auto-execution enabled"
+        lines = [
+            "Bet signal (Polymarket-style)",
             f"Event: {event.title}",
             f"Source: {event.source}",
             f"URL: {event.url}",
+            f"Priority: {analysis.packet.priority_score:.2f} ({analysis.packet.priority_reason})",
             f"Market: {market}",
-            f"Action: {decision.action}",
-            f"Stake USD: {decision.stake_usd:.2f}",
+            f"Side: {side}",
+            f"Stake: ${decision.stake_usd:.2f}",
             f"Confidence: {decision.confidence:.2f}",
-            f"Reasoning: {decision.rationale}",
+            f"Rationale: {decision.rationale}",
             f"Execution: {execution.message}",
-            "",
-            "Model views:",
+            f"Mode: {mode_text}",
         ]
-        for model in analysis.model_outputs:
-            lines.append(
-                f"- {model.model_name}: side={model.recommended_side}, "
-                f"conf={model.confidence:.2f}, shift={model.probability_shift:.2f}, "
-                f"thesis={model.thesis}"
-            )
-        return "\n".join(lines)[:3900]
+        return "\n".join(lines)

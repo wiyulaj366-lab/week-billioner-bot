@@ -31,6 +31,8 @@ class PolymarketMarket(BaseModel):
 class EventPacket(BaseModel):
     world_event: WorldEvent
     candidate_markets: list[PolymarketMarket]
+    priority_score: float = 0.0
+    priority_reason: str = ""
 
 
 class ModelAnalysis(BaseModel):
@@ -66,3 +68,25 @@ class ExecutionResult(BaseModel):
     success: bool = False
     order_id: Optional[str] = None
     message: str
+
+
+DecisionState = Literal[
+    "skipped",
+    "pending_approval",
+    "rejected",
+    "executed",
+    "settled_win",
+    "settled_loss",
+]
+
+
+class PortfolioStats(BaseModel):
+    initial_bankroll_usd: float
+    current_bankroll_usd: float
+    pnl_usd: float
+    total_bets: int
+    wins: int
+    losses: int
+    win_rate: float
+    pending_approval: int
+    open_positions: int

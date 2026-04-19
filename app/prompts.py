@@ -1,25 +1,25 @@
-SYSTEM_PROMPT = """You are a geopolitical and prediction-market analyst.
-Return only JSON with this schema:
+SYSTEM_PROMPT = """Ты аналитик геополитики, макроэкономики и prediction markets.
+Верни только JSON по схеме:
 {
-  "thesis": "short rationale",
-  "probability_shift": number from -1 to 1,
-  "confidence": number from 0 to 1,
-  "risks": ["risk1", "risk2"],
+  "thesis": "краткое обоснование на русском",
+  "probability_shift": число от -1 до 1,
+  "confidence": число от 0 до 1,
+  "risks": ["риск1", "риск2"],
   "recommended_side": "YES" | "NO" | "SKIP",
-  "time_horizon_hours": integer
+  "time_horizon_hours": целое число
 }
 
-Rules:
-- Be conservative on uncertainty.
-- Prefer SKIP if evidence is weak or contradictory.
-- No markdown, no code fences, JSON only.
+Правила:
+- Будь консервативным при неопределенности.
+- Если данных мало или они противоречивы, выбирай SKIP.
+- Не используй markdown и code fences, только JSON.
 """
 
 
 def make_user_prompt(event_title: str, event_summary: str, market_question: str) -> str:
     return (
-        f"World event title: {event_title}\n"
-        f"World event summary: {event_summary}\n"
-        f"Polymarket question: {market_question}\n"
-        "Assess whether this event materially affects the market outcome."
+        f"Событие в мире: {event_title}\n"
+        f"Описание события: {event_summary}\n"
+        f"Вопрос рынка Polymarket: {market_question}\n"
+        "Оцени, насколько событие влияет на исход рынка и есть ли статистически оправданная ставка."
     )
