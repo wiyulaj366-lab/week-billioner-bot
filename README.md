@@ -122,3 +122,23 @@ Examples:
 - Add observability stack (Prometheus/Grafana/Sentry) before real capital.
 - Add position reconciliation and market exposure limits before enabling auto-execution.
 
+## CI/CD (GitHub Actions -> Server)
+
+Implemented workflows:
+- `.github/workflows/ci.yml` - dependency install + import smoke test.
+- `.github/workflows/deploy.yml` - copy code to server via SCP + `docker compose up -d --build`.
+
+Repository secrets required:
+- `DEPLOY_HOST` (example: `2.26.61.97`)
+- `DEPLOY_USER` (example: `root`)
+- `DEPLOY_PASSWORD` (server password)
+
+Server requirements:
+- Docker + Docker Compose installed.
+- `/opt/week-billioner-bot/.env` present with your runtime secrets.
+
+Deployment flow:
+1. Push to `main`.
+2. GitHub Actions copies app files to `/opt/week-billioner-bot`.
+3. Deploy job SSHes into server and runs `docker compose up -d --build`.
+
