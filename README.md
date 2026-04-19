@@ -20,7 +20,9 @@ Important: default mode is safe (`DRY_RUN=true`, `AUTO_EXECUTE=false`), so no li
 - `app/services/decision.py`: consensus + guardrails (`min confidence`, `min volume`, `max daily loss`).
 - `app/services/execution.py`: dry-run execution placeholder (live adapter hook).
 - `app/services/notifier.py`: Telegram alerts.
+- `app/services/admin_bot.py`: Telegram admin bot (private access by Telegram user ID).
 - `app/services/storage.py`: SQLite audit/log tables.
+- `app/services/runtime_config.py`: runtime overrides (change config without manual file edits).
 - `app/pipeline.py`: one full processing cycle.
 - `app/main.py`: FastAPI app + scheduler.
 
@@ -35,6 +37,9 @@ cp .env.example .env
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 - LLM credentials (`LLM_1_*`, `LLM_2_*`, `LLM_3_*`)
+- Optional but recommended for admin:
+  - `ADMIN_TELEGRAM_BOT_TOKEN`
+  - `ADMIN_TELEGRAM_USER_ID`
 
 3. Start:
 ```bash
@@ -84,6 +89,31 @@ LLM analyzers:
 - `LLM_1_NAME`, `LLM_1_BASE_URL`, `LLM_1_MODEL`, `LLM_1_API_KEY`
 - `LLM_2_*`
 - `LLM_3_*`
+
+Admin bot:
+- `ADMIN_TELEGRAM_BOT_TOKEN`: bot token for admin commands (recommended separate bot).
+- `ADMIN_TELEGRAM_USER_ID`: your Telegram numeric user ID; only this ID can manage config.
+
+## Telegram Admin Commands
+
+If admin bot is configured, send commands to your admin bot:
+
+- `/help` - commands list.
+- `/status` - current runtime mode and thresholds.
+- `/keys` - editable keys.
+- `/set KEY VALUE` - set runtime value immediately.
+- `/show KEY` - view current override value (secret keys masked).
+- `/mode safe` - `DRY_RUN=true`, `AUTO_EXECUTE=false`.
+- `/mode live` - `DRY_RUN=false`, `AUTO_EXECUTE=true`.
+
+Examples:
+
+```text
+/set MIN_CONFIDENCE 0.72
+/set MAX_BET_USD 50
+/set LLM_1_API_KEY sk-...
+/mode safe
+```
 
 ## Production Notes
 

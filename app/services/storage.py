@@ -50,6 +50,16 @@ class Storage:
                 );
                 """
             )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS runtime_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    is_secret INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                """
+            )
             await db.commit()
 
     async def is_processed(self, event_url: str) -> bool:
@@ -123,3 +133,38 @@ class Storage:
                 (key, delta_usd),
             )
             await db.commit()
+
+    async def set_runtime_config(self, key: str, value: str, is_secret: bool = False) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO runtime_config (key, value, is_secret, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                ON CONFLICT(key) DO UPDATE SET
+                    value=excluded.value,
+                    is_secret=excluded.is_secret,
+                    updated_at=datetime('now')
+                """,
+                (key, value, int(is_secret)),
+            )
+            await db.commit()
+
+    async def get_runtime_config_value(self, key: str) -> Optional[str]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute("SELECT value FROM runtime_config WHERE key = ? LIMIT 1", (key,))
+            row = await cur.fetchone()
+            return str(row[0]) if row else None
+
+    async def get_runtime_config_map(self) -> dict[str, str]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute("SELECT key, value FROM runtime_config")
+            rows = await cur.fetchall()
+            return {str(k): str(v) for k, v in rows}
+
+    async def list_runtime_config(self) -> list[tuple[str, bool, str]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute(
+                "SELECT key, is_secret, updated_at FROM runtime_config ORDER BY key ASC"
+            )
+            rows = await cur.fetchall()
+            return [(str(k), bool(i), str(ts)) for k, i, ts in rows]

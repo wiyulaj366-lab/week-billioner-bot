@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    admin_telegram_bot_token: str = ""
+    admin_telegram_user_id: int = 0
 
     dry_run: bool = True
     auto_execute: bool = False

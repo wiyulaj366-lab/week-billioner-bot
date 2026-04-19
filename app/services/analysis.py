@@ -7,18 +7,21 @@ import httpx
 from app.config import LLMConfig
 from app.models import AggregatedAnalysis, EventPacket, ModelAnalysis
 from app.prompts import SYSTEM_PROMPT, make_user_prompt
+from app.services.runtime_config import RuntimeConfigService
 
 logger = logging.getLogger(__name__)
 
 
 class AnalysisService:
-    def __init__(self, llms: list[LLMConfig]):
-        self.llms = llms
+    def __init__(self, runtime_config: RuntimeConfigService):
+        self.runtime_config = runtime_config
 
     async def analyze(self, packet: EventPacket) -> AggregatedAnalysis:
         target_market = packet.candidate_markets[0]
+        runtime = await self.runtime_config.snapshot()
+        llms = runtime.llms
         outputs: list[ModelAnalysis] = []
-        for llm in self.llms:
+        for llm in llms:
             outputs.append(await self._analyze_with_one(llm, packet, target_market.question))
 
         if not outputs:

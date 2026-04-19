@@ -1,16 +1,19 @@
 from app.config import Settings
 from app.models import Decision, ExecutionResult
+from app.services.runtime_config import RuntimeConfigService
 
 
 class ExecutionService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, runtime_config: RuntimeConfigService):
         self.settings = settings
+        self.runtime_config = runtime_config
 
     async def execute(self, decision: Decision) -> ExecutionResult:
+        runtime = await self.runtime_config.snapshot()
         if decision.action == "SKIP":
             return ExecutionResult(simulated=True, success=True, message="No trade executed (SKIP).")
 
-        if self.settings.dry_run or not self.settings.auto_execute:
+        if runtime.dry_run or not runtime.auto_execute:
             return ExecutionResult(
                 simulated=True,
                 success=True,
