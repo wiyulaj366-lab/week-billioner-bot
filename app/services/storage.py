@@ -277,21 +277,26 @@ class Storage:
         async with aiosqlite.connect(self.db_path) as db:
             cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE action != 'NO_BET'")
             total_bets = int((await cur.fetchone())[0])
+
             cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE decision_state = 'settled_win'")
             wins = int((await cur.fetchone())[0])
+
             cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE decision_state = 'settled_loss'")
             losses = int((await cur.fetchone())[0])
-                        cur = await db.execute(
-                                """
-                                SELECT COUNT(*)
-                                FROM decisions
-                                WHERE decision_state = 'pending_approval'
-                                    AND action NOT IN ('SKIP', 'NO_BET')
-                                """
-                        )
+
+            cur = await db.execute(
+                """
+                SELECT COUNT(*)
+                FROM decisions
+                WHERE decision_state = 'pending_approval'
+                  AND action NOT IN ('SKIP', 'NO_BET')
+                """
+            )
             pending_approval = int((await cur.fetchone())[0])
+
             cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE decision_state = 'executed'")
             open_positions = int((await cur.fetchone())[0])
+
             cur = await db.execute("SELECT COALESCE(SUM(pnl_usd), 0) FROM decisions")
             pnl = float((await cur.fetchone())[0] or 0.0)
 
