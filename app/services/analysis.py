@@ -32,18 +32,14 @@ class AnalysisService:
                     probability_shift=0.0,
                     confidence=0.0,
                     risks=["no_models_configured"],
-                    recommended_side="SKIP",
+                    recommended_side="NO",
                     time_horizon_hours=24,
                 )
             ]
 
         yes_votes = sum(1 for o in outputs if o.recommended_side == "YES")
         no_votes = sum(1 for o in outputs if o.recommended_side == "NO")
-        consensus_side = "SKIP"
-        if yes_votes > no_votes:
-            consensus_side = "YES"
-        elif no_votes > yes_votes:
-            consensus_side = "NO"
+        consensus_side = "YES" if yes_votes > no_votes else "NO"
 
         consensus_confidence = float(mean([o.confidence for o in outputs]))
         summary = " | ".join(f"{o.model_name}: {o.thesis[:140]}" for o in outputs)
@@ -61,7 +57,10 @@ class AnalysisService:
         user_prompt = make_user_prompt(
             packet.world_event.title,
             packet.world_event.summary,
+            packet.world_event.url,
             market_question,
+            packet.candidate_markets[0].yes_price,
+            packet.candidate_markets[0].no_price,
         )
         payload = {
             "model": llm.model,
@@ -82,8 +81,8 @@ class AnalysisService:
                 data = resp.json()
                 content = data["choices"][0]["message"]["content"]
             parsed = json.loads(content)
-            side_raw = str(parsed.get("recommended_side", "SKIP")).upper()
-            side = side_raw if side_raw in {"YES", "NO", "SKIP"} else "SKIP"
+            side_raw = str(parsed.get("recommended_side", "NO")).upper()
+            side = side_raw if side_raw in {"YES", "NO"} else "NO"
             return ModelAnalysis(
                 model_name=llm.name,
                 thesis=str(parsed.get("thesis", ""))[:400],
@@ -101,6 +100,6 @@ class AnalysisService:
                 probability_shift=0.0,
                 confidence=0.0,
                 risks=["model_error"],
-                recommended_side="SKIP",
+                recommended_side="NO",
                 time_horizon_hours=24,
             )

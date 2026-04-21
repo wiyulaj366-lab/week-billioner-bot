@@ -128,7 +128,7 @@ class TelegramAdminBot:
                     question=str(row.get("market_question") or ""),
                     url=str(row.get("market_url") or "") or None,
                 ),
-                action=str(row.get("action", "SKIP")),
+                action=str(row.get("action", "NO_BET")),
                 stake_usd=float(row.get("stake_usd") or 0.0),
                 confidence=float(row.get("confidence") or 0.0),
                 rationale=str(row.get("rationale") or ""),
@@ -208,19 +208,21 @@ class TelegramAdminBot:
             await self._send_pending_cards(chat_id)
             return
         if data == "menu:settings":
-            await self._send_message(chat_id, "Настройки бота:", reply_markup=self._settings_keyboard())
+            await self._send_message(chat_id, "⚙️ Настройки бота:", reply_markup=self._settings_keyboard())
             return
         if data == "menu:llm_setup":
             self._chat_state[int(chat_id)] = "awaiting_llm_1"
             await self._send_message(
                 chat_id,
-                "Отправь настройки для единственной LLM (ChatGPT 5.3) в формате:\n"
+                "🤖 Отправь настройки для единственной LLM (ChatGPT 5.3) в формате:\n"
                 "name=ChatGPT 5.3\n"
                 "base_url=https://api.openai.com/v1\n"
                 "model=gpt-5.3\n"
                 "api_key=sk-...\n\n"
                 "Можно также одной строкой через | :\n"
-                "ChatGPT 5.3|https://api.openai.com/v1|gpt-5.3|sk-...",
+                "ChatGPT 5.3|https://api.openai.com/v1|gpt-5.3|sk-...\n\n"
+                "Для отмены нажми: ↩️ Назад",
+                reply_markup={"inline_keyboard": [[{"text": "↩️ Назад", "callback_data": "menu:back_settings"}]]},
             )
             return
         if data == "menu:llm_show":
@@ -230,13 +232,23 @@ class TelegramAdminBot:
             self._chat_state[int(chat_id)] = "awaiting_polymarket"
             await self._send_message(
                 chat_id,
-                "Отправь настройки Polymarket в формате:\n"
+                "🔗 Отправь настройки Polymarket в формате:\n"
                 "clob_host=https://clob.polymarket.com\n"
                 "chain_id=137\n"
                 "signature_type=1\n"
                 "private_key=0x...\n"
-                "funder_address=0x...",
+                "funder_address=0x...\n\n"
+                "Для отмены нажми: ↩️ Назад",
+                reply_markup={"inline_keyboard": [[{"text": "↩️ Назад", "callback_data": "menu:back_settings"}]]},
             )
+            return
+        if data == "menu:back_main":
+            self._chat_state.pop(int(chat_id), None)
+            await self._send_message(chat_id, "🏠 Главное меню", reply_markup=self._panel_keyboard())
+            return
+        if data == "menu:back_settings":
+            self._chat_state.pop(int(chat_id), None)
+            await self._send_message(chat_id, "⚙️ Настройки", reply_markup=self._settings_keyboard())
             return
         if data == "menu:pm_show":
             await self._send_message(chat_id, await self._polymarket_status_text())
@@ -261,7 +273,7 @@ class TelegramAdminBot:
 
     async def _handle_command(self, chat_id: int | str, text: str) -> str:
         if text in {"/start", "/help"}:
-            await self._send_message(chat_id, "Панель управления:", reply_markup=self._panel_keyboard())
+            await self._send_message(chat_id, "🏠 Панель управления:", reply_markup=self._panel_keyboard())
             return (
                 "Команды:\n"
                 "/status - текущие настройки\n"
@@ -277,13 +289,13 @@ class TelegramAdminBot:
             )
 
         if text == "/panel":
-            await self._send_message(chat_id, "Открываю панель:", reply_markup=self._panel_keyboard())
+            await self._send_message(chat_id, "🏠 Открываю панель:", reply_markup=self._panel_keyboard())
             return ""
 
         if text == "/llm":
             self._chat_state[int(chat_id)] = "awaiting_llm_1"
             return (
-                "Отправь настройки LLM в формате:\n"
+                "🤖 Отправь настройки LLM в формате:\n"
                 "name=ChatGPT 5.3\n"
                 "base_url=https://api.openai.com/v1\n"
                 "model=gpt-5.3\n"
@@ -293,7 +305,7 @@ class TelegramAdminBot:
         if text == "/pm":
             self._chat_state[int(chat_id)] = "awaiting_polymarket"
             return (
-                "Отправь настройки Polymarket в формате:\n"
+                "🔗 Отправь настройки Polymarket в формате:\n"
                 "clob_host=https://clob.polymarket.com\n"
                 "chain_id=137\n"
                 "signature_type=1\n"
@@ -442,7 +454,7 @@ class TelegramAdminBot:
         if not rows:
             await self._send_message(chat_id, "Открытых ставок нет.")
             return
-        await self._send_message(chat_id, "Открытые позиции: выбери карточку")
+        await self._send_message(chat_id, "📌 Открытые позиции: выбери карточку")
         for row in rows:
             await self._send_message(
                 chat_id,
@@ -483,7 +495,7 @@ class TelegramAdminBot:
         if not rows:
             await self._send_message(chat_id, "Нет ставок, ожидающих подтверждения.")
             return
-        await self._send_message(chat_id, "Ожидают решения: выбери карточку")
+        await self._send_message(chat_id, "🧭 Ожидают решения: выбери карточку")
         for row in rows:
             await self._send_message(
                 chat_id,
@@ -541,7 +553,16 @@ class TelegramAdminBot:
         market_question = str(row.get("market_question") or "-")
         market_url = str(row.get("market_url") or "-")
         action = str(row.get("action") or "-")
-        state = str(row.get("decision_state") or "-")
+        state_raw = str(row.get("decision_state") or "-")
+        state_labels = {
+            "pending_approval": "🧭 Ожидает решения",
+            "executed": "✅ Исполнено",
+            "rejected": "❌ Отклонено",
+            "settled_win": "🏆 Закрыто WIN",
+            "settled_loss": "📉 Закрыто LOSS",
+            "skipped": "🚫 НЕ СТАВИТЬ",
+        }
+        state = state_labels.get(state_raw, state_raw)
         msg = str(row.get("execution_message") or "")
         stake = float(row.get("stake_usd") or 0.0)
         confidence = float(row.get("confidence") or 0.0)
@@ -713,22 +734,22 @@ class TelegramAdminBot:
         return {
             "inline_keyboard": [
                 [
-                    {"text": "Статистика", "callback_data": "menu:stats"},
-                    {"text": "Текущие ставки", "callback_data": "menu:open"},
+                    {"text": "📊 Статистика", "callback_data": "menu:stats"},
+                    {"text": "📌 Текущие ставки", "callback_data": "menu:open"},
                 ],
                 [
-                    {"text": "История ставок", "callback_data": "menu:history"},
-                    {"text": "Ожидают решения", "callback_data": "menu:pending"},
+                    {"text": "🗂️ История", "callback_data": "menu:history"},
+                    {"text": "🧭 Ожидают решения", "callback_data": "menu:pending"},
                 ],
                 [
                     {
-                        "text": "Переключить авто/ручной режим",
+                        "text": "🔁 Переключить авто/ручной режим",
                         "callback_data": "menu:toggle_mode",
                     }
                 ],
                 [
                     {
-                        "text": "Настройки и LLM",
+                        "text": "⚙️ Настройки и LLM",
                         "callback_data": "menu:settings",
                     }
                 ],
@@ -740,18 +761,19 @@ class TelegramAdminBot:
         return {
             "inline_keyboard": [
                 [
-                    {"text": "Добавить 1 LLM", "callback_data": "menu:llm_setup"},
-                    {"text": "Показать LLM", "callback_data": "menu:llm_show"},
+                    {"text": "🤖 Добавить 1 LLM", "callback_data": "menu:llm_setup"},
+                    {"text": "🧾 Показать LLM", "callback_data": "menu:llm_show"},
                 ],
                 [
-                    {"text": "Привязать Polymarket", "callback_data": "menu:pm_setup"},
-                    {"text": "Статус Polymarket", "callback_data": "menu:pm_show"},
+                    {"text": "🔗 Привязать Polymarket", "callback_data": "menu:pm_setup"},
+                    {"text": "🧾 Статус Polymarket", "callback_data": "menu:pm_show"},
                 ],
                 [
-                    {"text": "Переключить DRY_RUN", "callback_data": "menu:toggle_dry_run"},
-                    {"text": "Переключить AUTO_EXECUTE", "callback_data": "menu:toggle_mode"},
+                    {"text": "🧪 Переключить DRY_RUN", "callback_data": "menu:toggle_dry_run"},
+                    {"text": "🚀 Переключить AUTO_EXECUTE", "callback_data": "menu:toggle_mode"},
                 ],
-                [{"text": "Ожидают решения", "callback_data": "menu:pending"}],
+                [{"text": "🧭 Ожидают решения", "callback_data": "menu:pending"}],
+                [{"text": "↩️ Назад", "callback_data": "menu:back_main"}],
             ]
         }
 

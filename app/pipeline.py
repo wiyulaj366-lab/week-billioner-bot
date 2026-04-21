@@ -38,7 +38,7 @@ class TradingPipeline:
         packets = await self.ingestion.collect_event_packets(self.settings.max_events_per_cycle)
         processed = 0
         signaled = 0
-        skipped = 0
+        no_bet = 0
         for packet in packets:
             try:
                 analysis = await self.analysis.analyze(packet)
@@ -46,13 +46,33 @@ class TradingPipeline:
                 runtime = await self.runtime_config.snapshot()
                 require_confirmation = not runtime.auto_execute
 
-                if decision.action == "SKIP":
+                if decision.action == "NO_BET":
+                    execution = ExecutionResult(
+                        simulated=True,
+                        success=True,
+                        message="Решение: НЕ СТАВИТЬ.",
+                    )
+                    decision_id = await self.storage.store_decision(
+                        packet,
+                        analysis,
+                        decision,
+                        execution,
+                        decision_state="skipped",
+                    )
                     await self.storage.mark_processed(
                         packet.world_event.url,
                         packet.world_event.title,
                         packet.world_event.ingested_at.isoformat(),
                     )
-                    skipped += 1
+                    await self.notifier.notify_actionable(
+                        analysis=analysis,
+                        decision=decision,
+                        execution=execution,
+                        decision_id=decision_id,
+                        require_confirmation=False,
+                    )
+                    no_bet += 1
+                    signaled += 1
                     processed += 1
                     continue
 
@@ -94,5 +114,5 @@ class TradingPipeline:
             "fetched_packets": len(packets),
             "processed_packets": processed,
             "signaled_packets": signaled,
-            "skipped_packets": skipped,
+            "no_bet_packets": no_bet,
         }

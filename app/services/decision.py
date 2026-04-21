@@ -13,11 +13,11 @@ class DecisionService:
     async def decide(self, analysis: AggregatedAnalysis) -> Decision:
         runtime = await self.runtime_config.snapshot()
         if not analysis.packet.candidate_markets:
-            return Decision(rationale="Подходящих рынков для события не найдено.")
+            return Decision(action="NO_BET", rationale="Подходящих рынков для события не найдено.")
 
         if analysis.packet.priority_score < 1.0:
             return Decision(
-                action="SKIP",
+                action="NO_BET",
                 confidence=analysis.consensus_confidence,
                 rationale="Событие имеет низкий приоритет влияния на крипто-рынки.",
                 blocked_by_guardrail=True,
@@ -28,7 +28,7 @@ class DecisionService:
         if market.volume_usd < runtime.min_market_volume:
             return Decision(
                 market=market,
-                action="SKIP",
+                action="NO_BET",
                 confidence=analysis.consensus_confidence,
                 rationale="Объем рынка ниже минимального порога.",
                 blocked_by_guardrail=True,
@@ -39,7 +39,7 @@ class DecisionService:
         if daily_pnl <= -abs(runtime.max_daily_loss_usd):
             return Decision(
                 market=market,
-                action="SKIP",
+                action="NO_BET",
                 confidence=analysis.consensus_confidence,
                 rationale="Достигнут дневной лимит убытка.",
                 blocked_by_guardrail=True,
@@ -49,19 +49,11 @@ class DecisionService:
         if analysis.consensus_confidence < runtime.min_confidence:
             return Decision(
                 market=market,
-                action="SKIP",
+                action="NO_BET",
                 confidence=analysis.consensus_confidence,
                 rationale="Уверенность консенсуса ниже заданного порога.",
                 blocked_by_guardrail=True,
                 guardrail_reason="min_confidence",
-            )
-
-        if analysis.consensus_side == "SKIP":
-            return Decision(
-                market=market,
-                action="SKIP",
-                confidence=analysis.consensus_confidence,
-                rationale="Консенсус моделей: SKIP.",
             )
 
         action = "BET_YES" if analysis.consensus_side == "YES" else "BET_NO"

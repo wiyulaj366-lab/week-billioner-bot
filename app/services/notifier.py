@@ -22,27 +22,26 @@ class TelegramNotifier:
         decision_id: int,
         require_confirmation: bool,
     ) -> None:
-        if decision.action == "SKIP":
-            return
-
         runtime = await self.runtime_config.snapshot()
-        token = self.settings.admin_telegram_bot_token or runtime.telegram_bot_token
-        chat_id = runtime.telegram_chat_id
-        if not token or not chat_id:
+        is_ru = runtime.user_language.startswith("ru")
+
+        info_token = runtime.telegram_bot_token or self.settings.telegram_bot_token
+        info_chat_id = runtime.telegram_chat_id
+        if info_token and info_chat_id:
+            info_text = self._build_info_signal_message_ru(analysis, decision) if is_ru else self._build_info_signal_message_en(analysis, decision)
+            await self._send_message(info_token, info_chat_id, info_text)
+
+        admin_token = self.settings.admin_telegram_bot_token
+        admin_chat_id = self.settings.admin_telegram_user_id
+        if not admin_token or not admin_chat_id:
             return
 
-        is_ru = runtime.user_language.startswith("ru")
-        text = self._build_message_ru(analysis, decision, execution, require_confirmation)
+        admin_text = self._build_message_ru(analysis, decision, execution, require_confirmation)
         if not is_ru:
-            text = self._build_message_en(analysis, decision, execution, require_confirmation)
-
-        payload: dict = {
-            "chat_id": chat_id,
-            "text": text[:3900],
-            "disable_web_page_preview": True,
-        }
-        if require_confirmation:
-            payload["reply_markup"] = {
+            admin_text = self._build_message_en(analysis, decision, execution, require_confirmation)
+        reply_markup = None
+        if require_confirmation and decision.action != "NO_BET":
+            reply_markup = {
                 "inline_keyboard": [
                     [
                         {"text": "Отклонить", "callback_data": f"decision:reject:{decision_id}"},
@@ -51,13 +50,86 @@ class TelegramNotifier:
                 ]
             }
 
+        await self._send_message(admin_token, admin_chat_id, admin_text, reply_markup=reply_markup)
+
+    async def _send_message(
+        self,
+        token: str,
+        chat_id: int | str,
+        text: str,
+        reply_markup: dict | None = None,
+    ) -> None:
+        payload: dict = {
+            "chat_id": chat_id,
+            "text": text[:3900],
+            "disable_web_page_preview": True,
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()
         except Exception as exc:
-            logger.exception("Telegram actionable notify failed: %s", exc)
+            logger.exception("Telegram notify failed: %s", exc)
+
+    @staticmethod
+    def _build_info_signal_message_ru(analysis: AggregatedAnalysis, decision: Decision) -> str:
+        market_title = decision.market.question if decision.market else "N/A"
+        market_url = decision.market.url if decision.market and decision.market.url else "N/A"
+        if decision.action == "BET_YES":
+            ai_decision = "СТАВИТЬ (YES)"
+        elif decision.action == "BET_NO":
+            ai_decision = "СТАВИТЬ (NO)"
+        else:
+            ai_decision = "НЕ СТАВИТЬ"
+
+        risks = []
+        for output in analysis.model_outputs:
+            for risk in output.risks:
+                if risk not in risks:
+                    risks.append(risk)
+        risk_text = ", ".join(risks[:4]) if risks else "умеренный"
+
+        return "\n".join(
+            [
+                "🚨 НОВЫЙ СИГНАЛ",
+                f"📌 Название: {market_title}",
+                f"🔗 Ссылка на Polymarket: {market_url}",
+                f"🧠 Решение ИИ: {ai_decision}",
+                f"⚠️ Риск: {risk_text}",
+            ]
+        )
+
+    @staticmethod
+    def _build_info_signal_message_en(analysis: AggregatedAnalysis, decision: Decision) -> str:
+        market_title = decision.market.question if decision.market else "N/A"
+        market_url = decision.market.url if decision.market and decision.market.url else "N/A"
+        if decision.action == "BET_YES":
+            ai_decision = "BET (YES)"
+        elif decision.action == "BET_NO":
+            ai_decision = "BET (NO)"
+        else:
+            ai_decision = "NO BET"
+
+        risks = []
+        for output in analysis.model_outputs:
+            for risk in output.risks:
+                if risk not in risks:
+                    risks.append(risk)
+        risk_text = ", ".join(risks[:4]) if risks else "moderate"
+
+        return "\n".join(
+            [
+                "🚨 NEW SIGNAL",
+                f"📌 Signal: {market_title}",
+                f"🔗 Polymarket link: {market_url}",
+                f"🧠 AI decision: {ai_decision}",
+                f"⚠️ Risk: {risk_text}",
+            ]
+        )
 
     @staticmethod
     def _build_message_ru(
@@ -68,7 +140,12 @@ class TelegramNotifier:
     ) -> str:
         event = analysis.packet.world_event
         market = decision.market.question if decision.market else "N/A"
-        side = "ДА" if decision.action == "BET_YES" else "НЕТ"
+        if decision.action == "BET_YES":
+            side = "СТАВИТЬ (YES)"
+        elif decision.action == "BET_NO":
+            side = "СТАВИТЬ (NO)"
+        else:
+            side = "НЕ СТАВИТЬ"
         mode_text = "Требуется подтверждение" if require_confirmation else "Автоисполнение включено"
         lines = [
             "Сигнал для ставки (Polymarket-style)",
@@ -97,7 +174,12 @@ class TelegramNotifier:
     ) -> str:
         event = analysis.packet.world_event
         market = decision.market.question if decision.market else "N/A"
-        side = "YES" if decision.action == "BET_YES" else "NO"
+        if decision.action == "BET_YES":
+            side = "BET (YES)"
+        elif decision.action == "BET_NO":
+            side = "BET (NO)"
+        else:
+            side = "NO BET"
         mode_text = "Manual confirmation required" if require_confirmation else "Auto-execution enabled"
         lines = [
             "Bet signal (Polymarket-style)",

@@ -19,8 +19,8 @@ class ExecutionService:
 
     async def execute(self, decision: Decision, market_id: str | None = None) -> ExecutionResult:
         runtime = await self.runtime_config.snapshot()
-        if decision.action == "SKIP":
-            return ExecutionResult(simulated=True, success=True, message="Информ-режим: SKIP.")
+        if decision.action == "NO_BET":
+            return ExecutionResult(simulated=True, success=True, message="Решение: НЕ СТАВИТЬ.")
 
         target_market_id = market_id or (decision.market.market_id if decision.market else None)
         if not target_market_id:

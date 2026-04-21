@@ -54,17 +54,25 @@ class IngestionService:
         markets = await self.polymarket_client.fetch_open_markets(limit=150)
 
         packets: list[EventPacket] = []
-        for event in world_events:
-            if await self.storage.is_processed(event.url):
+        for market in markets:
+            if not self._is_crypto_market(market):
                 continue
-            matched = self._match_markets(event, markets)
-            if not matched:
+
+            event, relevance = self._best_related_news(market, world_events)
+            if event is None:
                 continue
-            score, reason = self._priority_score(event, matched[0])
+
+            tracking_url = self._tracking_url(event.url, market.market_id)
+            if await self.storage.is_processed(tracking_url):
+                continue
+
+            tracked_event = event.model_copy(update={"url": tracking_url})
+            score, reason = self._priority_score(tracked_event, market)
+            score += relevance
             packets.append(
                 EventPacket(
-                    world_event=event,
-                    candidate_markets=matched[:5],
+                    world_event=tracked_event,
+                    candidate_markets=[market],
                     priority_score=score,
                     priority_reason=reason,
                 )
@@ -72,6 +80,33 @@ class IngestionService:
 
         packets.sort(key=lambda p: p.priority_score, reverse=True)
         return packets[:max_events]
+
+    def _best_related_news(
+        self,
+        market: PolymarketMarket,
+        world_events: list[WorldEvent],
+    ) -> tuple[WorldEvent | None, float]:
+        market_tokens = self._keywords(market.question.lower())
+        if not market_tokens:
+            return None, 0.0
+
+        best_event: WorldEvent | None = None
+        best_score = 0.0
+        is_btc_market = self._is_bitcoin_text(market.question.lower())
+        for event in world_events:
+            text = f"{event.title} {event.summary}".lower()
+            event_tokens = self._keywords(text)
+            overlap = len(event_tokens.intersection(market_tokens))
+            if overlap <= 0:
+                continue
+            score = float(overlap)
+            if is_btc_market and self._is_bitcoin_text(text):
+                score += 4.0
+            if score > best_score:
+                best_score = score
+                best_event = event
+
+        return best_event, best_score
 
     def _match_markets(self, event: WorldEvent, markets: list[PolymarketMarket]) -> list[PolymarketMarket]:
         text = f"{event.title} {event.summary}".lower()
@@ -125,6 +160,16 @@ class IngestionService:
     @staticmethod
     def _is_bitcoin_text(text: str) -> bool:
         return "bitcoin" in text or "btc" in text
+
+    @staticmethod
+    def _is_crypto_market(market: PolymarketMarket) -> bool:
+        q = market.question.lower()
+        return any(k in q for k in CRYPTO_KEYWORDS)
+
+    @staticmethod
+    def _tracking_url(source_url: str, market_id: str) -> str:
+        sep = "&" if "?" in source_url else "?"
+        return f"{source_url}{sep}pm_market={market_id}"
 
     @staticmethod
     def _keywords(text: str) -> set[str]:

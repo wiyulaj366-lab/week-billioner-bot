@@ -73,6 +73,7 @@ class Storage:
                 """
             )
             await self._migrate_decisions_columns(db)
+            await self._cleanup_pending_non_bet(db)
             await db.commit()
 
     async def _migrate_decisions_columns(self, db: aiosqlite.Connection) -> None:
@@ -89,6 +90,18 @@ class Storage:
         for col, ddl in required.items():
             if col not in existing:
                 await db.execute(ddl)
+
+    async def _cleanup_pending_non_bet(self, db: aiosqlite.Connection) -> None:
+        await db.execute(
+            """
+            UPDATE decisions
+            SET decision_state = 'rejected',
+                execution_success = 0,
+                execution_message = 'Автоочистка: решение НЕ СТАВИТЬ не требует подтверждения.'
+            WHERE decision_state = 'pending_approval'
+              AND action IN ('SKIP', 'NO_BET')
+            """
+        )
 
     async def is_processed(self, event_url: str) -> bool:
         async with aiosqlite.connect(self.db_path) as db:
@@ -187,7 +200,21 @@ class Storage:
             await self.increment_daily_pnl(pnl_delta)
 
     async def list_pending_approvals(self, limit: int = 15) -> list[dict]:
-        return await self._list_by_state(("pending_approval",), limit=limit)
+                async with aiosqlite.connect(self.db_path) as db:
+                        db.row_factory = aiosqlite.Row
+                        cur = await db.execute(
+                                """
+                                SELECT id, created_at, event_title, event_url, market_question, market_url, action, stake_usd,
+                                             confidence, decision_state, execution_message
+                                FROM decisions
+                                WHERE decision_state = 'pending_approval'
+                                    AND action NOT IN ('SKIP', 'NO_BET')
+                                ORDER BY id DESC
+                                LIMIT ?
+                                """,
+                                (limit,),
+                        )
+                        return [dict(r) for r in await cur.fetchall()]
 
     async def list_open_positions(self, limit: int = 20) -> list[dict]:
         return await self._list_by_state(("executed",), limit=limit)
@@ -248,13 +275,20 @@ class Storage:
 
     async def stats(self, initial_bankroll_usd: float) -> PortfolioStats:
         async with aiosqlite.connect(self.db_path) as db:
-            cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE action != 'SKIP'")
+            cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE action != 'NO_BET'")
             total_bets = int((await cur.fetchone())[0])
             cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE decision_state = 'settled_win'")
             wins = int((await cur.fetchone())[0])
             cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE decision_state = 'settled_loss'")
             losses = int((await cur.fetchone())[0])
-            cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE decision_state = 'pending_approval'")
+                        cur = await db.execute(
+                                """
+                                SELECT COUNT(*)
+                                FROM decisions
+                                WHERE decision_state = 'pending_approval'
+                                    AND action NOT IN ('SKIP', 'NO_BET')
+                                """
+                        )
             pending_approval = int((await cur.fetchone())[0])
             cur = await db.execute("SELECT COUNT(*) FROM decisions WHERE decision_state = 'executed'")
             open_positions = int((await cur.fetchone())[0])

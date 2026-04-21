@@ -43,21 +43,21 @@ class ModelAnalysis(BaseModel):
     probability_shift: float = 0.0
     confidence: float = 0.0
     risks: list[str] = Field(default_factory=list)
-    recommended_side: Literal["YES", "NO", "SKIP"] = "SKIP"
+    recommended_side: Literal["YES", "NO"] = "NO"
     time_horizon_hours: int = 24
 
 
 class AggregatedAnalysis(BaseModel):
     packet: EventPacket
     model_outputs: list[ModelAnalysis]
-    consensus_side: Literal["YES", "NO", "SKIP"]
+    consensus_side: Literal["YES", "NO"]
     consensus_confidence: float
     summary_reasoning: str
 
 
 class Decision(BaseModel):
     market: Optional[PolymarketMarket] = None
-    action: Literal["BET_YES", "BET_NO", "SKIP"] = "SKIP"
+    action: Literal["BET_YES", "BET_NO", "NO_BET"] = "NO_BET"
     stake_usd: float = 0.0
     confidence: float = 0.0
     rationale: str
