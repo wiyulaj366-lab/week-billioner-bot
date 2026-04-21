@@ -26,6 +26,14 @@ ALLOWED_KEYS = {
     "LLM_1_BASE_URL",
     "LLM_1_MODEL",
     "LLM_1_API_KEY",
+    "LLM_2_NAME",
+    "LLM_2_BASE_URL",
+    "LLM_2_MODEL",
+    "LLM_2_API_KEY",
+    "LLM_3_NAME",
+    "LLM_3_BASE_URL",
+    "LLM_3_MODEL",
+    "LLM_3_API_KEY",
     "POLYMARKET_CLOB_HOST",
     "POLYMARKET_CHAIN_ID",
     "POLYMARKET_SIGNATURE_TYPE",
@@ -36,6 +44,8 @@ ALLOWED_KEYS = {
 SECRET_KEYS = {
     "TELEGRAM_BOT_TOKEN",
     "LLM_1_API_KEY",
+    "LLM_2_API_KEY",
+    "LLM_3_API_KEY",
     "POLYMARKET_PRIVATE_KEY",
 }
 
@@ -211,16 +221,23 @@ class TelegramAdminBot:
             await self._send_message(chat_id, "⚙️ Настройки бота:", reply_markup=self._settings_keyboard())
             return
         if data == "menu:llm_setup":
-            self._chat_state[int(chat_id)] = "awaiting_llm_1"
+            await self._send_message(chat_id, "🤖 Выбери LLM слот для настройки:", reply_markup=self._llm_slot_keyboard("setup"))
+            return
+        if data.startswith("menu:llm_setup:"):
+            slot = data.rsplit(":", 1)[1]
+            if slot not in {"1", "2", "3"}:
+                await self._send_message(chat_id, "Некорректный LLM слот.")
+                return
+            self._chat_state[int(chat_id)] = f"awaiting_llm_{slot}"
             await self._send_message(
                 chat_id,
-                "🤖 Отправь настройки для единственной LLM (ChatGPT 5.3) в формате:\n"
-                "name=ChatGPT 5.3\n"
+                f"🤖 Отправь настройки для LLM_{slot} в формате:\n"
+                f"name=LLM {slot}\n"
                 "base_url=https://api.openai.com/v1\n"
-                "model=gpt-5.3\n"
+                "model=gpt-5.4-mini\n"
                 "api_key=sk-...\n\n"
                 "Можно также одной строкой через | :\n"
-                "ChatGPT 5.3|https://api.openai.com/v1|gpt-5.3|sk-...\n\n"
+                f"LLM {slot}|https://api.openai.com/v1|gpt-5.4-mini|sk-...\n\n"
                 "Для отмены нажми: ↩️ Назад",
                 reply_markup={"inline_keyboard": [[{"text": "↩️ Назад", "callback_data": "menu:back_settings"}]]},
             )
@@ -278,7 +295,8 @@ class TelegramAdminBot:
                 "Команды:\n"
                 "/status - текущие настройки\n"
                 "/panel - кнопки управления\n"
-                "/llm - мастер настройки единственной LLM\n"
+                "/llm - мастер настройки LLM (слоты 1/2/3)\n"
+                "/llm1, /llm2, /llm3 - настройка конкретного слота\n"
                 "/pm - мастер привязки Polymarket\n"
                 "/keys - список изменяемых ключей\n"
                 "/set KEY VALUE - изменить настройку\n"
@@ -293,12 +311,17 @@ class TelegramAdminBot:
             return ""
 
         if text == "/llm":
-            self._chat_state[int(chat_id)] = "awaiting_llm_1"
+            await self._send_message(chat_id, "🤖 Выбери LLM слот для настройки:", reply_markup=self._llm_slot_keyboard("setup"))
+            return ""
+
+        if text in {"/llm1", "/llm2", "/llm3"}:
+            slot = text[-1]
+            self._chat_state[int(chat_id)] = f"awaiting_llm_{slot}"
             return (
-                "🤖 Отправь настройки LLM в формате:\n"
-                "name=ChatGPT 5.3\n"
+                f"🤖 Отправь настройки LLM_{slot} в формате:\n"
+                f"name=LLM {slot}\n"
                 "base_url=https://api.openai.com/v1\n"
-                "model=gpt-5.3\n"
+                "model=gpt-5.4-mini\n"
                 "api_key=sk-..."
             )
 
@@ -393,22 +416,26 @@ class TelegramAdminBot:
             f"MIN_MARKET_VOLUME={snapshot.min_market_volume}\n"
             f"INITIAL_BANKROLL_USD={snapshot.initial_bankroll_usd}\n"
             f"USER_LANGUAGE={snapshot.user_language}\n"
-            f"LLM_ENABLED={len(snapshot.llms)} (используется только 1 LLM)\n"
+            f"LLM_ENABLED={len(snapshot.llms)}\n"
             f"POLYMARKET_BOUND={bool(snapshot.polymarket_private_key and snapshot.polymarket_funder_address)}"
         )
 
     async def _llm_status_text(self) -> str:
         snapshot = await self.runtime_config.snapshot()
         if not snapshot.llms:
-            return "LLM не настроена. Нажми кнопку 'Добавить 1 LLM'."
-        llm = snapshot.llms[0]
-        return (
-            "Текущая LLM:\n"
-            f"name={llm.name}\n"
-            f"base_url={llm.base_url}\n"
-            f"model={llm.model}\n"
-            f"api_key={self._mask(llm.api_key)}"
-        )
+            return "LLM не настроены. Нажми кнопку '🤖 Добавить / изменить LLM'."
+        lines = [f"Текущие LLM ({len(snapshot.llms)}):"]
+        for i, llm in enumerate(snapshot.llms, start=1):
+            lines.extend(
+                [
+                    f"\nLLM_{i}:",
+                    f"name={llm.name}",
+                    f"base_url={llm.base_url}",
+                    f"model={llm.model}",
+                    f"api_key={self._mask(llm.api_key)}",
+                ]
+            )
+        return "\n".join(lines)
 
     async def _polymarket_status_text(self) -> str:
         snapshot = await self.runtime_config.snapshot()
@@ -608,26 +635,32 @@ class TelegramAdminBot:
                 f"funder_address={parsed_pm['funder_address']}"
             )
 
-        if state != "awaiting_llm_1":
+        if not state or not state.startswith("awaiting_llm_"):
             return None
+
+        slot = state.rsplit("_", 1)[1]
+        if slot not in {"1", "2", "3"}:
+            self._chat_state.pop(chat_id, None)
+            return "Некорректный LLM слот в состоянии. Запусти /llm снова."
 
         parsed = self._parse_llm_payload(text)
         if not parsed:
             return (
                 "Не удалось распознать формат. Отправь снова:\n"
-                "name=ChatGPT 5.3\n"
+                f"name=LLM {slot}\n"
                 "base_url=https://api.openai.com/v1\n"
-                "model=gpt-5.3\n"
+                "model=gpt-5.4-mini\n"
                 "api_key=sk-..."
             )
 
-        await self.runtime_config.set_value("LLM_1_NAME", parsed["name"])
-        await self.runtime_config.set_value("LLM_1_BASE_URL", parsed["base_url"])
-        await self.runtime_config.set_value("LLM_1_MODEL", parsed["model"])
-        await self.runtime_config.set_value("LLM_1_API_KEY", parsed["api_key"], is_secret=True)
+        prefix = f"LLM_{slot}_"
+        await self.runtime_config.set_value(prefix + "NAME", parsed["name"])
+        await self.runtime_config.set_value(prefix + "BASE_URL", parsed["base_url"])
+        await self.runtime_config.set_value(prefix + "MODEL", parsed["model"])
+        await self.runtime_config.set_value(prefix + "API_KEY", parsed["api_key"], is_secret=True)
         self._chat_state.pop(chat_id, None)
         return (
-            "LLM сохранена.\n"
+            f"LLM_{slot} сохранена.\n"
             f"name={parsed['name']}\n"
             f"base_url={parsed['base_url']}\n"
             f"model={parsed['model']}\n"
@@ -640,9 +673,9 @@ class TelegramAdminBot:
             parts = [p.strip() for p in text.split("|")]
             if len(parts) >= 4:
                 return {
-                    "name": parts[0] or "ChatGPT 5.3",
+                    "name": parts[0] or "GPT-5.4 Mini",
                     "base_url": parts[1],
-                    "model": parts[2] or "gpt-5.3",
+                    "model": parts[2] or "gpt-5.4-mini",
                     "api_key": parts[3],
                 }
 
@@ -660,7 +693,7 @@ class TelegramAdminBot:
         if not base_url or not model or not api_key:
             return None
         return {
-            "name": kv.get("name", "ChatGPT 5.3"),
+            "name": kv.get("name", "GPT-5.4 Mini"),
             "base_url": base_url,
             "model": model,
             "api_key": api_key,
@@ -761,7 +794,7 @@ class TelegramAdminBot:
         return {
             "inline_keyboard": [
                 [
-                    {"text": "🤖 Добавить 1 LLM", "callback_data": "menu:llm_setup"},
+                    {"text": "🤖 Добавить / изменить LLM", "callback_data": "menu:llm_setup"},
                     {"text": "🧾 Показать LLM", "callback_data": "menu:llm_show"},
                 ],
                 [
@@ -774,6 +807,19 @@ class TelegramAdminBot:
                 ],
                 [{"text": "🧭 Ожидают решения", "callback_data": "menu:pending"}],
                 [{"text": "↩️ Назад", "callback_data": "menu:back_main"}],
+            ]
+        }
+
+    @staticmethod
+    def _llm_slot_keyboard(mode: str) -> dict:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "LLM 1", "callback_data": f"menu:llm_{mode}:1"},
+                    {"text": "LLM 2", "callback_data": f"menu:llm_{mode}:2"},
+                    {"text": "LLM 3", "callback_data": f"menu:llm_{mode}:3"},
+                ],
+                [{"text": "↩️ Назад", "callback_data": "menu:back_settings"}],
             ]
         }
 

@@ -7,6 +7,14 @@ from app.config import LLMConfig, Settings
 from app.services.storage import Storage
 
 
+def _normalize_model_name(model: str) -> str:
+    text = str(model or "").strip()
+    # Backward compatibility: old alias used in previous config.
+    if text == "gpt-5.3":
+        return "gpt-5.4-mini"
+    return text
+
+
 def _to_bool(raw: str | bool | None, default: bool) -> bool:
     if raw is None:
         return default
@@ -107,12 +115,27 @@ class RuntimeConfigService:
 
     def _build_llm_configs(self, o: dict[str, str]) -> list[LLMConfig]:
         llms: list[LLMConfig] = []
-        cfg = LLMConfig(
-            name=o.get("LLM_1_NAME", self.settings.llm_1_name),
-            base_url=o.get("LLM_1_BASE_URL", self.settings.llm_1_base_url),
-            model=o.get("LLM_1_MODEL", self.settings.llm_1_model),
-            api_key=o.get("LLM_1_API_KEY", self.settings.llm_1_api_key),
-        )
-        if cfg.enabled:
-            llms.append(cfg)
+        candidates = [
+            LLMConfig(
+                name=o.get("LLM_1_NAME", self.settings.llm_1_name),
+                base_url=o.get("LLM_1_BASE_URL", self.settings.llm_1_base_url),
+                model=_normalize_model_name(o.get("LLM_1_MODEL", self.settings.llm_1_model)),
+                api_key=o.get("LLM_1_API_KEY", self.settings.llm_1_api_key),
+            ),
+            LLMConfig(
+                name=o.get("LLM_2_NAME", self.settings.llm_2_name),
+                base_url=o.get("LLM_2_BASE_URL", self.settings.llm_2_base_url),
+                model=_normalize_model_name(o.get("LLM_2_MODEL", self.settings.llm_2_model)),
+                api_key=o.get("LLM_2_API_KEY", self.settings.llm_2_api_key),
+            ),
+            LLMConfig(
+                name=o.get("LLM_3_NAME", self.settings.llm_3_name),
+                base_url=o.get("LLM_3_BASE_URL", self.settings.llm_3_base_url),
+                model=_normalize_model_name(o.get("LLM_3_MODEL", self.settings.llm_3_model)),
+                api_key=o.get("LLM_3_API_KEY", self.settings.llm_3_api_key),
+            ),
+        ]
+        for cfg in candidates:
+            if cfg.enabled:
+                llms.append(cfg)
         return llms
