@@ -54,6 +54,8 @@ def make_btc_prompt(
     market_question: str,
     yes_price: float | None,
     no_price: float | None,
+    price_source: str,
+    price_source_url: str,
 ) -> str:
     candle_lines = []
     for c in candles[-10:]:  # последние 10 из 15
@@ -70,6 +72,9 @@ def make_btc_prompt(
 
     return (
         f"Текущая цена BTC/USDT: ${current_price:,.2f}\n\n"
+        f"Источник цены: {price_source}\n"
+        f"URL источника: {price_source_url}\n"
+        "Важно: для BTC Up/Down market резолв идет по Chainlink BTC/USD stream, а не по споту биржи.\n\n"
         f"Последние 1-мин свечи (старые → новые):\n{candles_text}\n\n"
         f"Свежие новости (последние заголовки):\n{news_text}\n\n"
         f"Вопрос рынка Polymarket: {market_question}\n"

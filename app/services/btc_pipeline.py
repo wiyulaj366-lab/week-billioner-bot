@@ -69,11 +69,14 @@ class BtcPipeline:
 
         # 2. Получить цену BTC и свечи
         try:
-            current_price = await self.ticker.get_price()
+            price_info = await self.ticker.get_price_with_source()
+            current_price = float(price_info["price"])
+            price_source = str(price_info["source"])
+            price_source_url = str(price_info["source_url"])
             candles = await self.ticker.get_candles(interval="1m", limit=15)
         except Exception as exc:
-            logger.error("BTC pipeline: ошибка получения цены с Binance: %s", exc)
-            return {"status": "binance_error", "error": str(exc)}
+            logger.error("BTC pipeline: ошибка получения цены BTC: %s", exc)
+            return {"status": "price_source_error", "error": str(exc)}
 
         # 3. Получить последние новости
         try:
@@ -91,6 +94,8 @@ class BtcPipeline:
             market_question=market.question,
             yes_price=market.yes_price,
             no_price=market.no_price,
+            price_source=price_source,
+            price_source_url=price_source_url,
         )
 
         analyses: list[ModelAnalysis] = []
@@ -190,6 +195,8 @@ class BtcPipeline:
             stake_usd=stake,
             rationale=rationale[:400],
             market_url=market.url or "",
+            price_source=price_source,
+            price_source_url=price_source_url,
             require_confirmation=require_confirmation,
             decision_id=decision_id,
         )

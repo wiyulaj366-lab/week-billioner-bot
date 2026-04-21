@@ -241,6 +241,8 @@ class TelegramNotifier:
         stake_usd: float,
         rationale: str,
         market_url: str,
+        price_source: str,
+        price_source_url: str,
         require_confirmation: bool,
         decision_id: int,
     ) -> None:
@@ -256,6 +258,8 @@ class TelegramNotifier:
             "⚡ BTC СИГНАЛ (5 мин)",
             f"🎯 Направление: {arrow}",
             f"🔗 Рынок: {market_url}",
+            f"🧭 Источник цены: {price_source}",
+            f"📎 Источник: {price_source_url}",
             f"📊 Уверенность: {confidence:.0%}",
             f"💵 Ставка: ${stake_usd:.2f}",
             f"🧠 Обоснование: {rationale[:300]}",
@@ -299,5 +303,6 @@ class TelegramNotifier:
             "market_closed": "рынок закрыт",
             "price_stale": "устаревшие котировки",
             "binance_error": "ошибка получения цены BTC",
+            "price_source_error": "ошибка источника цены BTC",
         }
         return _MAP.get(risk, risk)
