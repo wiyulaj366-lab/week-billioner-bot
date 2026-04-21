@@ -11,6 +11,8 @@ from app.models import (
     DecisionState,
     EventPacket,
     ExecutionResult,
+    ModelAnalysis,
+    PolymarketMarket,
     PortfolioStats,
 )
 
@@ -69,6 +71,25 @@ class Storage:
                     value TEXT NOT NULL,
                     is_secret INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                """
+            )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS open_positions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    decision_id INTEGER NOT NULL,
+                    market_id TEXT NOT NULL,
+                    token_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    amount_usd REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    market_question TEXT NOT NULL,
+                    market_url TEXT NOT NULL DEFAULT '',
+                    opened_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    closed_at TEXT,
+                    close_reason TEXT,
+                    exit_price REAL
                 );
                 """
             )
@@ -342,3 +363,114 @@ class Storage:
             )
             rows = await cur.fetchall()
             return [(str(k), bool(i), str(ts)) for k, i, ts in rows]
+
+    # ------------------------------------------------------------------
+    # BTC решения (хранятся в той же таблице decisions без event_url)
+    # ------------------------------------------------------------------
+    async def store_btc_decision(
+        self,
+        market: PolymarketMarket,
+        decision: Decision,
+        execution: ExecutionResult,
+        decision_state: DecisionState,
+        current_price: float,
+        analyses: list[ModelAnalysis],
+    ) -> int:
+        raw = json.dumps(
+            {
+                "btc_price": current_price,
+                "analyses": [a.model_dump(mode="json") for a in analyses],
+            },
+            ensure_ascii=True,
+        )
+        async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute(
+                """
+                INSERT INTO decisions (
+                    created_at, event_url, event_title, market_id, market_question, market_url,
+                    action, stake_usd, confidence, blocked_by_guardrail, rationale,
+                    execution_success, execution_message, decision_state, pnl_usd, raw_analysis
+                )
+                VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"btc_5min_{market.market_id}",
+                    f"BTC 5-мин: {market.question}",
+                    market.market_id,
+                    market.question,
+                    market.url or "",
+                    decision.action,
+                    decision.stake_usd,
+                    decision.confidence,
+                    0,
+                    decision.rationale,
+                    int(execution.success),
+                    execution.message,
+                    decision_state,
+                    0.0,
+                    raw,
+                ),
+            )
+            await db.commit()
+            return int(cur.lastrowid)
+
+    # ------------------------------------------------------------------
+    # Позиции
+    # ------------------------------------------------------------------
+    async def add_open_position(
+        self,
+        decision_id: int,
+        market_id: str,
+        token_id: str,
+        action: str,
+        amount_usd: float,
+        entry_price: float,
+        market_question: str,
+        market_url: str,
+    ) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute(
+                """
+                INSERT INTO open_positions
+                    (decision_id, market_id, token_id, action, amount_usd, entry_price,
+                     market_question, market_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision_id, market_id, token_id, action,
+                    amount_usd, entry_price, market_question, market_url,
+                ),
+            )
+            await db.commit()
+            return int(cur.lastrowid)
+
+    async def get_open_positions(self) -> list[dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """
+                SELECT * FROM open_positions
+                WHERE closed_at IS NULL
+                ORDER BY id DESC
+                """
+            )
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def close_position(
+        self,
+        position_id: int,
+        exit_price: Optional[float],
+        close_reason: str,
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE open_positions
+                SET closed_at = datetime('now'),
+                    close_reason = ?,
+                    exit_price = ?
+                WHERE id = ?
+                """,
+                (close_reason, exit_price, position_id),
+            )
+            await db.commit()

@@ -52,7 +52,7 @@ class TradingPipeline:
                         success=True,
                         message="Решение: НЕ СТАВИТЬ.",
                     )
-                    decision_id = await self.storage.store_decision(
+                    await self.storage.store_decision(
                         packet,
                         analysis,
                         decision,
@@ -64,15 +64,13 @@ class TradingPipeline:
                         packet.world_event.title,
                         packet.world_event.ingested_at.isoformat(),
                     )
-                    await self.notifier.notify_actionable(
-                        analysis=analysis,
-                        decision=decision,
-                        execution=execution,
-                        decision_id=decision_id,
-                        require_confirmation=False,
+                    # NO_BET: не уведомляем, только логируем
+                    logger.debug(
+                        "NO_BET для '%s': %s",
+                        packet.world_event.title[:80],
+                        decision.rationale,
                     )
                     no_bet += 1
-                    signaled += 1
                     processed += 1
                     continue
 

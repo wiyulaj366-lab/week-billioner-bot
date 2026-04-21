@@ -37,6 +37,31 @@ class PolymarketClient:
                 return market
         return None
 
+    async def find_btc_updown_5min_market(self, limit: int = 200) -> PolymarketMarket | None:
+        """Ищет текущий активный рынок Bitcoin Up or Down 5-мин на Polymarket."""
+        _KEYWORDS = ["bitcoin up or down", "btc up or down", "bitcoin updown", "btc updown"]
+        _5MIN_HINTS = ["5 min", "5min", "5-min", "5 minute", "five minute"]
+        markets = await self.fetch_open_markets(limit=limit)
+        candidates: list[PolymarketMarket] = []
+        for m in markets:
+            q = m.question.lower()
+            if any(kw in q for kw in _KEYWORDS):
+                candidates.append(m)
+        if not candidates:
+            # Попробуем поиск по slug в URL
+            for m in markets:
+                url = (m.url or "").lower()
+                if "btc-updown-5m" in url or "btc-up-or-down-5m" in url:
+                    candidates.append(m)
+        # Приоритет: 5-мин рынки
+        for m in candidates:
+            q = m.question.lower()
+            url = (m.url or "").lower()
+            if any(h in q for h in _5MIN_HINTS) or "5m" in url:
+                return m
+        # Вернуть первый кандидат, если 5-мин не найден
+        return candidates[0] if candidates else None
+
     def _extract_markets_from_event(self, event: dict[str, Any]) -> list[PolymarketMarket]:
         out: list[PolymarketMarket] = []
         markets = event.get("markets") or []

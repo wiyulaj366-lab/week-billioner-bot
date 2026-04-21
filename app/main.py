@@ -10,11 +10,14 @@ from app.log import configure_logging
 from app.pipeline import TradingPipeline
 from app.services.admin_bot import TelegramAdminBot
 from app.services.analysis import AnalysisService
+from app.services.btc_pipeline import BtcPipeline
+from app.services.btc_ticker import BtcTicker
 from app.services.decision import DecisionService
 from app.services.execution import ExecutionService
 from app.services.ingestion import IngestionService
 from app.services.notifier import TelegramNotifier
 from app.services.polymarket import PolymarketClient
+from app.services.position_monitor import PositionMonitor
 from app.services.runtime_config import RuntimeConfigService
 from app.services.storage import Storage
 from app.services.world_events import WorldEventsClient
@@ -27,10 +30,13 @@ app = FastAPI(title="week-billioner-bot", version="0.1.0")
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 pipeline: Optional[TradingPipeline] = None
+btc_pipeline: Optional[BtcPipeline] = None
+position_monitor: Optional[PositionMonitor] = None
 admin_bot: Optional[TelegramAdminBot] = None
 last_run_at: Optional[datetime] = None
 last_run_result: dict = {}
 is_running = False
+is_btc_running = False
 
 
 async def _run_pipeline_job() -> None:
@@ -49,6 +55,33 @@ async def _run_pipeline_job() -> None:
         is_running = False
 
 
+async def _run_btc_pipeline_job() -> None:
+    global is_btc_running
+    if is_btc_running:
+        logger.warning("BTC pipeline already running, skip.")
+        return
+    is_btc_running = True
+    try:
+        assert btc_pipeline is not None
+        result = await btc_pipeline.run_once()
+        logger.info("BTC cycle: %s", result)
+    except Exception as exc:
+        logger.exception("BTC pipeline error: %s", exc)
+    finally:
+        is_btc_running = False
+
+
+async def _run_position_monitor_job() -> None:
+    if position_monitor is None:
+        return
+    try:
+        result = await position_monitor.run_once()
+        if result.get("checked", 0) > 0:
+            logger.info("Position monitor: %s", result)
+    except Exception as exc:
+        logger.exception("Position monitor error: %s", exc)
+
+
 async def _poll_admin_bot_job() -> None:
     if admin_bot is None:
         return
@@ -57,14 +90,15 @@ async def _poll_admin_bot_job() -> None:
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    global pipeline, admin_bot
+    global pipeline, btc_pipeline, position_monitor, admin_bot
     storage = Storage(settings.database_path)
     await storage.init()
     runtime_config = RuntimeConfigService(settings=settings, storage=storage)
     polymarket_client = PolymarketClient(settings.polymarket_events_url)
+    world_client = WorldEventsClient(settings.get_world_feed_list())
 
     ingestion = IngestionService(
-        world_client=WorldEventsClient(settings.get_world_feed_list()),
+        world_client=world_client,
         polymarket_client=polymarket_client,
         storage=storage,
     )
@@ -90,12 +124,39 @@ async def on_startup() -> None:
         runtime_config=runtime_config,
     )
 
+    btc_pipeline = BtcPipeline(
+        settings=settings,
+        storage=storage,
+        ticker=BtcTicker(),
+        world_client=world_client,
+        polymarket_client=polymarket_client,
+        execution=execution,
+        notifier=notifier,
+        runtime_config=runtime_config,
+    )
+
+    position_monitor = PositionMonitor(
+        settings=settings,
+        storage=storage,
+        polymarket_client=polymarket_client,
+        execution=execution,
+        notifier=notifier,
+        runtime_config=runtime_config,
+    )
+
     scheduler.add_job(_run_pipeline_job, "interval", seconds=settings.poll_interval_seconds, id="poll-cycle")
+    # BTC 5-мин рынки: цикл каждые 4 минуты (240 сек)
+    scheduler.add_job(_run_btc_pipeline_job, "interval", seconds=240, id="btc-cycle")
+    # Мониторинг позиций: каждые 2 минуты
+    scheduler.add_job(_run_position_monitor_job, "interval", seconds=120, id="position-monitor")
     if admin_bot.enabled():
         scheduler.add_job(_poll_admin_bot_job, "interval", seconds=5, id="admin-bot-poll")
         logger.info("Admin bot polling enabled.")
     scheduler.start()
-    logger.info("Scheduler started with interval=%ss", settings.poll_interval_seconds)
+    logger.info(
+        "Scheduler started: news=%ss, btc=240s, positions=120s",
+        settings.poll_interval_seconds,
+    )
 
 
 @app.on_event("shutdown")

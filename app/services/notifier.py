@@ -91,7 +91,7 @@ class TelegramNotifier:
             for risk in output.risks:
                 if risk not in risks:
                     risks.append(risk)
-        risk_text = ", ".join(risks[:4]) if risks else "умеренный"
+        risk_text = ", ".join(TelegramNotifier._translate_risk(r) for r in risks[:4]) if risks else "умеренный"
 
         return "\n".join(
             [
@@ -196,3 +196,108 @@ class TelegramNotifier:
             f"Mode: {mode_text}",
         ]
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Уведомление о продаже позиции
+    # ------------------------------------------------------------------
+    async def notify_position_action(
+        self,
+        position: dict,
+        action: str,
+        current_price: float,
+        pnl_pct: float,
+        simulated: bool,
+    ) -> None:
+        runtime = await self.runtime_config.snapshot()
+        info_token = runtime.telegram_bot_token or self.settings.telegram_bot_token
+        info_chat_id = runtime.telegram_chat_id
+        admin_token = self.settings.admin_telegram_bot_token
+        admin_chat_id = self.settings.admin_telegram_user_id
+
+        verb = "Симуляция продажи" if simulated else "ПРОДАЖА ПОЗИЦИИ"
+        sign = "+" if pnl_pct >= 0 else ""
+        text = "\n".join([
+            f"💰 {verb}",
+            f"📌 Рынок: {position.get('market_question', 'N/A')}",
+            f"🔗 {position.get('market_url', '')}",
+            f"📊 Сторона: {position.get('action', 'N/A')}",
+            f"💵 Текущая цена: {current_price:.3f}",
+            f"{'📈' if pnl_pct >= 0 else '📉'} P&L: {sign}{pnl_pct:.1f}%",
+            f"🤖 Причина: {action}",
+        ])
+
+        if info_token and info_chat_id:
+            await self._send_message(info_token, info_chat_id, text)
+        if admin_token and admin_chat_id:
+            await self._send_message(admin_token, admin_chat_id, text)
+
+    # ------------------------------------------------------------------
+    # BTC-сигнал
+    # ------------------------------------------------------------------
+    async def notify_btc_signal(
+        self,
+        direction: str,
+        confidence: float,
+        stake_usd: float,
+        rationale: str,
+        market_url: str,
+        require_confirmation: bool,
+        decision_id: int,
+    ) -> None:
+        runtime = await self.runtime_config.snapshot()
+        info_token = runtime.telegram_bot_token or self.settings.telegram_bot_token
+        info_chat_id = runtime.telegram_chat_id
+        admin_token = self.settings.admin_telegram_bot_token
+        admin_chat_id = self.settings.admin_telegram_user_id
+
+        arrow = "⬆️ РОСТ" if direction == "YES" else "⬇️ ПАДЕНИЕ"
+        mode_text = "Требуется подтверждение" if require_confirmation else "Автоисполнение"
+        text = "\n".join([
+            "⚡ BTC СИГНАЛ (5 мин)",
+            f"🎯 Направление: {arrow}",
+            f"🔗 Рынок: {market_url}",
+            f"📊 Уверенность: {confidence:.0%}",
+            f"💵 Ставка: ${stake_usd:.2f}",
+            f"🧠 Обоснование: {rationale[:300]}",
+            f"⚙️ Режим: {mode_text}",
+        ])
+
+        if info_token and info_chat_id:
+            await self._send_message(info_token, info_chat_id, text)
+
+        if admin_token and admin_chat_id:
+            reply_markup = None
+            if require_confirmation:
+                reply_markup = {
+                    "inline_keyboard": [[
+                        {"text": "Отклонить", "callback_data": f"decision:reject:{decision_id}"},
+                        {"text": "Принять ставку", "callback_data": f"decision:approve:{decision_id}"},
+                    ]]
+                }
+            await self._send_message(admin_token, admin_chat_id, text, reply_markup=reply_markup)
+
+    @staticmethod
+    def _translate_risk(risk: str) -> str:
+        """Переводит английские коды ошибок/рисков в читаемый русский текст."""
+        _MAP = {
+            "model_error": "ошибка модели",
+            "ошибка_модели": "ошибка модели",
+            "no_models_configured": "модели не настроены",
+            "модели_не_настроены": "модели не настроены",
+            "timeout_error": "таймаут запроса",
+            "таймаут_модели": "таймаут запроса к модели",
+            "http_error_401": "ошибка авторизации модели (401)",
+            "http_error_429": "превышен лимит запросов к модели (429)",
+            "http_error_500": "ошибка сервера модели (500)",
+            "ошибка_формата_ответа": "модель вернула некорректный формат",
+            "low_volume": "низкий объём рынка",
+            "high_uncertainty": "высокая неопределённость",
+            "conflicting_signals": "противоречивые сигналы",
+            "news_gap": "недостаточно новостей",
+            "moderate": "умеренный",
+            "no_market": "рынок не найден",
+            "market_closed": "рынок закрыт",
+            "price_stale": "устаревшие котировки",
+            "binance_error": "ошибка получения цены BTC",
+        }
+        return _MAP.get(risk, risk)

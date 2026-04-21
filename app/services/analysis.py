@@ -31,7 +31,7 @@ class AnalysisService:
                     thesis="LLM не настроены, невозможно оценить направленное преимущество.",
                     probability_shift=0.0,
                     confidence=0.0,
-                    risks=["no_models_configured"],
+                    risks=["модели_не_настроены"],
                     recommended_side="NO",
                     time_horizon_hours=24,
                 )
@@ -92,14 +92,47 @@ class AnalysisService:
                 recommended_side=side,
                 time_horizon_hours=int(parsed.get("time_horizon_hours", 24)),
             )
-        except Exception as exc:
-            logger.exception("LLM analysis failed for %s: %s", llm.name, exc)
+        except httpx.TimeoutException as exc:
+            logger.error("Таймаут LLM запроса для %s: %s", llm.name, exc)
             return ModelAnalysis(
                 model_name=llm.name,
-                thesis=f"Ошибка модели: {type(exc).__name__}",
+                thesis=f"Таймаут запроса к модели ({llm.name})",
                 probability_shift=0.0,
                 confidence=0.0,
-                risks=["model_error"],
+                risks=["таймаут_модели"],
+                recommended_side="NO",
+                time_horizon_hours=24,
+            )
+        except httpx.HTTPStatusError as exc:
+            logger.error("HTTP ошибка LLM для %s: %s %s", llm.name, exc.response.status_code, exc.response.text[:200])
+            return ModelAnalysis(
+                model_name=llm.name,
+                thesis=f"HTTP ошибка {exc.response.status_code} от модели ({llm.name})",
+                probability_shift=0.0,
+                confidence=0.0,
+                risks=[f"http_ошибка_{exc.response.status_code}"],
+                recommended_side="NO",
+                time_horizon_hours=24,
+            )
+        except json.JSONDecodeError as exc:
+            logger.error("Некорректный JSON от LLM %s: %s", llm.name, exc)
+            return ModelAnalysis(
+                model_name=llm.name,
+                thesis=f"Модель вернула некорректный JSON ({llm.name})",
+                probability_shift=0.0,
+                confidence=0.0,
+                risks=["ошибка_формата_ответа"],
+                recommended_side="NO",
+                time_horizon_hours=24,
+            )
+        except Exception as exc:
+            logger.exception("Неизвестная ошибка LLM для %s: %s", llm.name, exc)
+            return ModelAnalysis(
+                model_name=llm.name,
+                thesis=f"Ошибка модели: {type(exc).__name__}: {exc}",
+                probability_shift=0.0,
+                confidence=0.0,
+                risks=["ошибка_модели"],
                 recommended_side="NO",
                 time_horizon_hours=24,
             )

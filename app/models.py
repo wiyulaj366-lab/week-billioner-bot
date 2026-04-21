@@ -72,6 +72,22 @@ class ExecutionResult(BaseModel):
     message: str
 
 
+class OpenPosition(BaseModel):
+    id: int
+    decision_id: int
+    market_id: str
+    token_id: str
+    action: Literal["BET_YES", "BET_NO"]
+    amount_usd: float
+    entry_price: float
+    market_question: str
+    market_url: str
+    opened_at: datetime
+    closed_at: Optional[datetime] = None
+    close_reason: Optional[str] = None
+    exit_price: Optional[float] = None
+
+
 DecisionState = Literal[
     "skipped",
     "pending_approval",
