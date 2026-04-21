@@ -19,21 +19,21 @@ SYSTEM_PROMPT = """Ты аналитик крипторынка, макроэк�
 
 
 def make_user_prompt(
-  event_title: str,
-  event_summary: str,
-  event_url: str,
-  market_question: str,
-  yes_price: float | None,
-  no_price: float | None,
+    event_title: str,
+    event_summary: str,
+    event_url: str,
+    market_question: str,
+    yes_price: float | None,
+    no_price: float | None,
 ) -> str:
-  yes_text = f"{yes_price:.3f}" if yes_price is not None else "N/A"
-  no_text = f"{no_price:.3f}" if no_price is not None else "N/A"
+    yes_text = f"{yes_price:.3f}" if yes_price is not None else "N/A"
+    no_text = f"{no_price:.3f}" if no_price is not None else "N/A"
     return (
         f"Событие в мире: {event_title}\n"
         f"Описание события: {event_summary}\n"
-    f"Ссылка на новость: {event_url}\n"
+        f"Ссылка на новость: {event_url}\n"
         f"Вопрос рынка Polymarket: {market_question}\n"
-    f"Текущие котировки рынка: YES={yes_text}, NO={no_text}\n"
-    "Оцени, насколько событие влияет на исход рынка с учетом котировок и новостного контекста. "
-    "Если стоит входить в позицию, выбери сторону YES/NO. Если входить не стоит, выбери NO с низкой confidence."
+        f"Текущие котировки рынка: YES={yes_text}, NO={no_text}\n"
+        "Оцени, насколько событие влияет на исход рынка с учетом котировок и новостного контекста. "
+        "Если стоит входить в позицию, выбери сторону YES/NO. Если входить не стоит, выбери NO с низкой confidence."
     )
