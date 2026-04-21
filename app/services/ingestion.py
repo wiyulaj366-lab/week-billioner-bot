@@ -50,7 +50,7 @@ class IngestionService:
         self.storage = storage
 
     async def collect_event_packets(self, max_events: int) -> list[EventPacket]:
-        world_events = await self.world_client.fetch_latest()
+        world_events = await self.world_client.fetch_latest(per_feed_limit=20)
         markets = await self.polymarket_client.fetch_open_markets(limit=150)
 
         packets: list[EventPacket] = []
@@ -80,13 +80,17 @@ class IngestionService:
             return []
 
         scored: list[tuple[float, PolymarketMarket]] = []
+        event_is_btc = self._is_bitcoin_text(text)
         for market in markets:
             market_tokens = self._keywords(market.question.lower())
             overlap = len(event_tokens.intersection(market_tokens))
             if overlap <= 0:
                 continue
             market_boost = min(market.volume_usd / 10000.0, 3.0) + min(market.liquidity_usd / 10000.0, 2.0)
-            scored.append((overlap + market_boost, market))
+            btc_boost = 0.0
+            if event_is_btc and self._is_bitcoin_text(market.question.lower()):
+                btc_boost = 4.0
+            scored.append((overlap + market_boost + btc_boost, market))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [market for _, market in scored]
 
@@ -95,20 +99,32 @@ class IngestionService:
         tokens = self._keywords(text)
         crypto_hits = len(tokens.intersection(CRYPTO_KEYWORDS))
         macro_hits = len(tokens.intersection(MACRO_RISK_KEYWORDS))
+        is_btc_event = self._is_bitcoin_text(text)
+        is_btc_market = self._is_bitcoin_text(top_market.question.lower())
 
         score = 0.0
         score += crypto_hits * 1.8
         score += macro_hits * 0.9
         score += min(top_market.volume_usd / 15000.0, 2.5)
         score += min(top_market.liquidity_usd / 15000.0, 1.5)
+        if is_btc_event:
+            score += 2.5
+        if is_btc_event and is_btc_market:
+            score += 5.0
 
-        if crypto_hits > 0:
+        if is_btc_event and is_btc_market:
+            reason = "GOLDEN BTC: релевантная новость + рынок Bitcoin"
+        elif crypto_hits > 0:
             reason = "Прямой крипто-триггер"
         elif macro_hits > 0:
             reason = "Макро/геополитический риск для крипто"
         else:
             reason = "Базовое совпадение с рынком"
         return score, reason
+
+    @staticmethod
+    def _is_bitcoin_text(text: str) -> bool:
+        return "bitcoin" in text or "btc" in text
 
     @staticmethod
     def _keywords(text: str) -> set[str]:

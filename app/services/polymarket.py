@@ -1,4 +1,5 @@
 import logging
+import json
 from datetime import datetime
 from typing import Any
 
@@ -29,6 +30,13 @@ class PolymarketClient:
             markets.extend(self._extract_markets_from_event(item))
         return markets
 
+    async def find_open_market_by_id(self, market_id: str, limit: int = 500) -> PolymarketMarket | None:
+        markets = await self.fetch_open_markets(limit=limit)
+        for market in markets:
+            if market.market_id == market_id:
+                return market
+        return None
+
     def _extract_markets_from_event(self, event: dict[str, Any]) -> list[PolymarketMarket]:
         out: list[PolymarketMarket] = []
         markets = event.get("markets") or []
@@ -42,6 +50,8 @@ class PolymarketClient:
             except Exception:
                 yes_price = None
                 no_price = None
+
+            yes_token_id, no_token_id = self._extract_token_ids(market)
 
             end_date = None
             raw_end = market.get("endDate") or event.get("endDate")
@@ -60,10 +70,32 @@ class PolymarketClient:
                     liquidity_usd=float(market.get("liquidity") or 0),
                     yes_price=yes_price,
                     no_price=no_price,
+                    yes_token_id=yes_token_id,
+                    no_token_id=no_token_id,
                     end_date=end_date,
                 )
             )
         return [m for m in out if m.market_id]
+
+    @staticmethod
+    def _extract_token_ids(market: dict[str, Any]) -> tuple[str | None, str | None]:
+        raw = market.get("clobTokenIds")
+        items: list[Any] = []
+        if isinstance(raw, list):
+            items = raw
+        elif isinstance(raw, str):
+            text = raw.strip()
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    items = parsed
+            except Exception:
+                parts = [p.strip() for p in text.strip("[]").split(",") if p.strip()]
+                items = [p.strip('"') for p in parts]
+
+        yes = str(items[0]) if len(items) > 0 and str(items[0]).strip() else None
+        no = str(items[1]) if len(items) > 1 and str(items[1]).strip() else None
+        return yes, no
 
     @staticmethod
     def _to_float(raw: Any, idx: int) -> float | None:

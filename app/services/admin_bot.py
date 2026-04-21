@@ -1,9 +1,10 @@
 import logging
+from typing import Optional
 
 import httpx
 
 from app.config import Settings
-from app.models import Decision
+from app.models import Decision, PolymarketMarket
 from app.services.execution import ExecutionService
 from app.services.runtime_config import RuntimeConfigService
 from app.services.storage import Storage
@@ -25,21 +26,17 @@ ALLOWED_KEYS = {
     "LLM_1_BASE_URL",
     "LLM_1_MODEL",
     "LLM_1_API_KEY",
-    "LLM_2_NAME",
-    "LLM_2_BASE_URL",
-    "LLM_2_MODEL",
-    "LLM_2_API_KEY",
-    "LLM_3_NAME",
-    "LLM_3_BASE_URL",
-    "LLM_3_MODEL",
-    "LLM_3_API_KEY",
+    "POLYMARKET_CLOB_HOST",
+    "POLYMARKET_CHAIN_ID",
+    "POLYMARKET_SIGNATURE_TYPE",
+    "POLYMARKET_PRIVATE_KEY",
+    "POLYMARKET_FUNDER_ADDRESS",
 }
 
 SECRET_KEYS = {
     "TELEGRAM_BOT_TOKEN",
     "LLM_1_API_KEY",
-    "LLM_2_API_KEY",
-    "LLM_3_API_KEY",
+    "POLYMARKET_PRIVATE_KEY",
 }
 
 
@@ -56,6 +53,7 @@ class TelegramAdminBot:
         self.storage = storage
         self.execution = execution
         self._offset = 0
+        self._chat_state: dict[int, str] = {}
 
     def enabled(self) -> bool:
         return bool(self.settings.admin_telegram_bot_token and self.settings.admin_telegram_user_id)
@@ -104,6 +102,11 @@ class TelegramAdminBot:
         if language_code:
             await self.runtime_config.set_value("USER_LANGUAGE", language_code)
 
+        state_reply = await self._consume_state(int(chat_id), text)
+        if state_reply is not None:
+            await self._send_message(chat_id, state_reply)
+            return
+
         reply = await self._handle_command(chat_id, text)
         if reply:
             await self._send_message(chat_id, reply)
@@ -120,21 +123,28 @@ class TelegramAdminBot:
                 return
 
             decision = Decision(
+                market=PolymarketMarket(
+                    market_id=str(row.get("market_id") or ""),
+                    question=str(row.get("market_question") or ""),
+                    url=str(row.get("market_url") or "") or None,
+                ),
                 action=str(row.get("action", "SKIP")),
                 stake_usd=float(row.get("stake_usd") or 0.0),
                 confidence=float(row.get("confidence") or 0.0),
                 rationale=str(row.get("rationale") or ""),
             )
-            execution = await self.execution.execute(decision)
+            execution = await self.execution.execute(decision, market_id=str(row.get("market_id") or ""))
+            new_state = "executed" if execution.success else "rejected"
             await self.storage.update_decision_state(
                 decision_id=decision_id,
-                decision_state="executed",
+                decision_state=new_state,  # type: ignore[arg-type]
                 execution_success=execution.success,
                 execution_message=execution.message,
             )
-            await self._send_message(
-                chat_id, f"Ставка #{decision_id} подтверждена. {execution.message}"
-            )
+            if execution.success:
+                await self._send_message(chat_id, f"Ставка #{decision_id} подтверждена. {execution.message}")
+            else:
+                await self._send_message(chat_id, f"Ставка #{decision_id} отклонена. {execution.message}")
             return
 
         if data.startswith("decision:reject:"):
@@ -148,17 +158,94 @@ class TelegramAdminBot:
             await self._send_message(chat_id, f"Ставка #{decision_id} отклонена.")
             return
 
+        if data.startswith("pending:view:"):
+            decision_id = int(data.rsplit(":", 1)[1])
+            await self._send_pending_decision_card(chat_id, decision_id)
+            return
+
+        if data.startswith("open:view:"):
+            decision_id = int(data.rsplit(":", 1)[1])
+            await self._send_open_position_card(chat_id, decision_id)
+            return
+
+        if data.startswith("open:settle:"):
+            parts = data.split(":")
+            if len(parts) != 4:
+                return
+            outcome = parts[2]
+            decision_id = int(parts[3])
+            row = await self.storage.get_decision(decision_id)
+            if not row:
+                await self._send_message(chat_id, "Ставка не найдена.")
+                return
+            stake = float(row.get("stake_usd") or 0.0)
+            if outcome == "win":
+                state = "settled_win"
+                pnl = abs(stake)
+            else:
+                state = "settled_loss"
+                pnl = -abs(stake)
+            await self.storage.update_decision_state(
+                decision_id=decision_id,
+                decision_state=state,  # type: ignore[arg-type]
+                execution_success=True,
+                execution_message=f"Позиция закрыта вручную: {outcome}.",
+                pnl_delta=pnl,
+            )
+            await self._send_message(chat_id, f"Позиция #{decision_id} закрыта как {outcome}, PnL={pnl:.2f} USD.")
+            return
+
         if data == "menu:stats":
             await self._send_message(chat_id, await self._stats_text())
             return
         if data == "menu:open":
-            await self._send_message(chat_id, await self._open_positions_text())
+            await self._send_open_positions_cards(chat_id)
             return
         if data == "menu:history":
             await self._send_message(chat_id, await self._history_text())
             return
         if data == "menu:pending":
-            await self._send_message(chat_id, await self._pending_text())
+            await self._send_pending_cards(chat_id)
+            return
+        if data == "menu:settings":
+            await self._send_message(chat_id, "Настройки бота:", reply_markup=self._settings_keyboard())
+            return
+        if data == "menu:llm_setup":
+            self._chat_state[int(chat_id)] = "awaiting_llm_1"
+            await self._send_message(
+                chat_id,
+                "Отправь настройки для единственной LLM (ChatGPT 5.3) в формате:\n"
+                "name=ChatGPT 5.3\n"
+                "base_url=https://api.openai.com/v1\n"
+                "model=gpt-5.3\n"
+                "api_key=sk-...\n\n"
+                "Можно также одной строкой через | :\n"
+                "ChatGPT 5.3|https://api.openai.com/v1|gpt-5.3|sk-...",
+            )
+            return
+        if data == "menu:llm_show":
+            await self._send_message(chat_id, await self._llm_status_text())
+            return
+        if data == "menu:pm_setup":
+            self._chat_state[int(chat_id)] = "awaiting_polymarket"
+            await self._send_message(
+                chat_id,
+                "Отправь настройки Polymarket в формате:\n"
+                "clob_host=https://clob.polymarket.com\n"
+                "chain_id=137\n"
+                "signature_type=1\n"
+                "private_key=0x...\n"
+                "funder_address=0x...",
+            )
+            return
+        if data == "menu:pm_show":
+            await self._send_message(chat_id, await self._polymarket_status_text())
+            return
+        if data == "menu:toggle_dry_run":
+            runtime = await self.runtime_config.snapshot()
+            new_val = "false" if runtime.dry_run else "true"
+            await self.runtime_config.set_value("DRY_RUN", new_val)
+            await self._send_message(chat_id, f"DRY_RUN переключен: {new_val}")
             return
         if data == "menu:toggle_mode":
             runtime = await self.runtime_config.snapshot()
@@ -179,6 +266,8 @@ class TelegramAdminBot:
                 "Команды:\n"
                 "/status - текущие настройки\n"
                 "/panel - кнопки управления\n"
+                "/llm - мастер настройки единственной LLM\n"
+                "/pm - мастер привязки Polymarket\n"
                 "/keys - список изменяемых ключей\n"
                 "/set KEY VALUE - изменить настройку\n"
                 "/show KEY - показать значение ключа\n"
@@ -190,6 +279,27 @@ class TelegramAdminBot:
         if text == "/panel":
             await self._send_message(chat_id, "Открываю панель:", reply_markup=self._panel_keyboard())
             return ""
+
+        if text == "/llm":
+            self._chat_state[int(chat_id)] = "awaiting_llm_1"
+            return (
+                "Отправь настройки LLM в формате:\n"
+                "name=ChatGPT 5.3\n"
+                "base_url=https://api.openai.com/v1\n"
+                "model=gpt-5.3\n"
+                "api_key=sk-..."
+            )
+
+        if text == "/pm":
+            self._chat_state[int(chat_id)] = "awaiting_polymarket"
+            return (
+                "Отправь настройки Polymarket в формате:\n"
+                "clob_host=https://clob.polymarket.com\n"
+                "chain_id=137\n"
+                "signature_type=1\n"
+                "private_key=0x...\n"
+                "funder_address=0x..."
+            )
 
         if text == "/keys":
             return "Изменяемые ключи:\n" + "\n".join(sorted(ALLOWED_KEYS))
@@ -271,7 +381,32 @@ class TelegramAdminBot:
             f"MIN_MARKET_VOLUME={snapshot.min_market_volume}\n"
             f"INITIAL_BANKROLL_USD={snapshot.initial_bankroll_usd}\n"
             f"USER_LANGUAGE={snapshot.user_language}\n"
-            f"LLM_ENABLED={len(snapshot.llms)}"
+            f"LLM_ENABLED={len(snapshot.llms)} (используется только 1 LLM)\n"
+            f"POLYMARKET_BOUND={bool(snapshot.polymarket_private_key and snapshot.polymarket_funder_address)}"
+        )
+
+    async def _llm_status_text(self) -> str:
+        snapshot = await self.runtime_config.snapshot()
+        if not snapshot.llms:
+            return "LLM не настроена. Нажми кнопку 'Добавить 1 LLM'."
+        llm = snapshot.llms[0]
+        return (
+            "Текущая LLM:\n"
+            f"name={llm.name}\n"
+            f"base_url={llm.base_url}\n"
+            f"model={llm.model}\n"
+            f"api_key={self._mask(llm.api_key)}"
+        )
+
+    async def _polymarket_status_text(self) -> str:
+        snapshot = await self.runtime_config.snapshot()
+        return (
+            "Polymarket:\n"
+            f"clob_host={snapshot.polymarket_clob_host}\n"
+            f"chain_id={snapshot.polymarket_chain_id}\n"
+            f"signature_type={snapshot.polymarket_signature_type}\n"
+            f"private_key={self._mask(snapshot.polymarket_private_key) if snapshot.polymarket_private_key else '<empty>'}\n"
+            f"funder_address={snapshot.polymarket_funder_address or '<empty>'}"
         )
 
     async def _stats_text(self) -> str:
@@ -302,6 +437,23 @@ class TelegramAdminBot:
             )
         return "\n".join(lines)[:3900]
 
+    async def _send_open_positions_cards(self, chat_id: int | str) -> None:
+        rows = await self.storage.list_open_positions(limit=10)
+        if not rows:
+            await self._send_message(chat_id, "Открытых ставок нет.")
+            return
+        await self._send_message(chat_id, "Открытые позиции: выбери карточку")
+        for row in rows:
+            await self._send_message(
+                chat_id,
+                self._format_row_card(row),
+                reply_markup={
+                    "inline_keyboard": [
+                        [{"text": "Открыть карточку", "callback_data": f"open:view:{row['id']}"}],
+                    ]
+                },
+            )
+
     async def _history_text(self) -> str:
         rows = await self.storage.list_recent_history(limit=15)
         if not rows:
@@ -325,6 +477,194 @@ class TelegramAdminBot:
                 f"{r.get('market_question') or '-'}"
             )
         return "\n".join(lines)[:3900]
+
+    async def _send_pending_cards(self, chat_id: int | str) -> None:
+        rows = await self.storage.list_pending_approvals(limit=10)
+        if not rows:
+            await self._send_message(chat_id, "Нет ставок, ожидающих подтверждения.")
+            return
+        await self._send_message(chat_id, "Ожидают решения: выбери карточку")
+        for row in rows:
+            await self._send_message(
+                chat_id,
+                self._format_row_card(row),
+                reply_markup={
+                    "inline_keyboard": [
+                        [{"text": "Открыть карточку", "callback_data": f"pending:view:{row['id']}"}],
+                    ]
+                },
+            )
+
+    async def _send_pending_decision_card(self, chat_id: int | str, decision_id: int) -> None:
+        row = await self.storage.get_decision(decision_id)
+        if not row:
+            await self._send_message(chat_id, "Ставка не найдена.")
+            return
+        if row.get("decision_state") != "pending_approval":
+            await self._send_message(chat_id, "Эта ставка уже обработана.")
+            return
+        await self._send_message(
+            chat_id,
+            self._format_row_card(row),
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "Отклонить", "callback_data": f"decision:reject:{decision_id}"},
+                        {"text": "Принять ставку", "callback_data": f"decision:approve:{decision_id}"},
+                    ]
+                ]
+            },
+        )
+
+    async def _send_open_position_card(self, chat_id: int | str, decision_id: int) -> None:
+        row = await self.storage.get_decision(decision_id)
+        if not row:
+            await self._send_message(chat_id, "Позиция не найдена.")
+            return
+        await self._send_message(
+            chat_id,
+            self._format_row_card(row),
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "Закрыть WIN", "callback_data": f"open:settle:win:{decision_id}"},
+                        {"text": "Закрыть LOSS", "callback_data": f"open:settle:loss:{decision_id}"},
+                    ]
+                ]
+            },
+        )
+
+    @staticmethod
+    def _format_row_card(row: dict) -> str:
+        event_title = str(row.get("event_title") or "-")
+        event_url = str(row.get("event_url") or "-")
+        market_question = str(row.get("market_question") or "-")
+        market_url = str(row.get("market_url") or "-")
+        action = str(row.get("action") or "-")
+        state = str(row.get("decision_state") or "-")
+        msg = str(row.get("execution_message") or "")
+        stake = float(row.get("stake_usd") or 0.0)
+        confidence = float(row.get("confidence") or 0.0)
+        return (
+            f"ID: #{row.get('id')}\n"
+            f"Статус: {state}\n"
+            f"Сигнал: {action} | ${stake:.2f} | conf={confidence:.2f}\n"
+            f"Событие: {event_title}\n"
+            f"Новости: {event_url}\n"
+            f"Рынок: {market_question}\n"
+            f"Рынок URL: {market_url}\n"
+            f"Сообщение: {msg}"
+        )[:3900]
+
+    async def _consume_state(self, chat_id: int, text: str) -> Optional[str]:
+        state = self._chat_state.get(chat_id)
+        if state == "awaiting_polymarket":
+            parsed_pm = self._parse_polymarket_payload(text)
+            if not parsed_pm:
+                return (
+                    "Не удалось распознать формат Polymarket. Отправь:\n"
+                    "clob_host=https://clob.polymarket.com\n"
+                    "chain_id=137\n"
+                    "signature_type=1\n"
+                    "private_key=0x...\n"
+                    "funder_address=0x..."
+                )
+
+            await self.runtime_config.set_value("POLYMARKET_CLOB_HOST", parsed_pm["clob_host"])
+            await self.runtime_config.set_value("POLYMARKET_CHAIN_ID", parsed_pm["chain_id"])
+            await self.runtime_config.set_value("POLYMARKET_SIGNATURE_TYPE", parsed_pm["signature_type"])
+            await self.runtime_config.set_value(
+                "POLYMARKET_PRIVATE_KEY", parsed_pm["private_key"], is_secret=True
+            )
+            await self.runtime_config.set_value("POLYMARKET_FUNDER_ADDRESS", parsed_pm["funder_address"])
+            self._chat_state.pop(chat_id, None)
+            return (
+                "Polymarket привязан.\n"
+                f"clob_host={parsed_pm['clob_host']}\n"
+                f"chain_id={parsed_pm['chain_id']}\n"
+                f"signature_type={parsed_pm['signature_type']}\n"
+                f"private_key={self._mask(parsed_pm['private_key'])}\n"
+                f"funder_address={parsed_pm['funder_address']}"
+            )
+
+        if state != "awaiting_llm_1":
+            return None
+
+        parsed = self._parse_llm_payload(text)
+        if not parsed:
+            return (
+                "Не удалось распознать формат. Отправь снова:\n"
+                "name=ChatGPT 5.3\n"
+                "base_url=https://api.openai.com/v1\n"
+                "model=gpt-5.3\n"
+                "api_key=sk-..."
+            )
+
+        await self.runtime_config.set_value("LLM_1_NAME", parsed["name"])
+        await self.runtime_config.set_value("LLM_1_BASE_URL", parsed["base_url"])
+        await self.runtime_config.set_value("LLM_1_MODEL", parsed["model"])
+        await self.runtime_config.set_value("LLM_1_API_KEY", parsed["api_key"], is_secret=True)
+        self._chat_state.pop(chat_id, None)
+        return (
+            "LLM сохранена.\n"
+            f"name={parsed['name']}\n"
+            f"base_url={parsed['base_url']}\n"
+            f"model={parsed['model']}\n"
+            f"api_key={self._mask(parsed['api_key'])}"
+        )
+
+    @staticmethod
+    def _parse_llm_payload(text: str) -> Optional[dict[str, str]]:
+        if "|" in text:
+            parts = [p.strip() for p in text.split("|")]
+            if len(parts) >= 4:
+                return {
+                    "name": parts[0] or "ChatGPT 5.3",
+                    "base_url": parts[1],
+                    "model": parts[2] or "gpt-5.3",
+                    "api_key": parts[3],
+                }
+
+        kv: dict[str, str] = {}
+        for raw in text.splitlines():
+            line = raw.strip()
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            kv[k.strip().lower()] = v.strip()
+
+        base_url = kv.get("base_url", "")
+        model = kv.get("model", "")
+        api_key = kv.get("api_key", "")
+        if not base_url or not model or not api_key:
+            return None
+        return {
+            "name": kv.get("name", "ChatGPT 5.3"),
+            "base_url": base_url,
+            "model": model,
+            "api_key": api_key,
+        }
+
+    @staticmethod
+    def _parse_polymarket_payload(text: str) -> Optional[dict[str, str]]:
+        kv: dict[str, str] = {}
+        for raw in text.splitlines():
+            line = raw.strip()
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            kv[k.strip().lower()] = v.strip()
+
+        required = ["clob_host", "chain_id", "signature_type", "private_key", "funder_address"]
+        if any(not kv.get(k) for k in required):
+            return None
+        return {
+            "clob_host": kv["clob_host"],
+            "chain_id": kv["chain_id"],
+            "signature_type": kv["signature_type"],
+            "private_key": kv["private_key"],
+            "funder_address": kv["funder_address"],
+        }
 
     async def _get_updates(self) -> list[dict]:
         url = f"https://api.telegram.org/bot{self.settings.admin_telegram_bot_token}/getUpdates"
@@ -386,6 +726,32 @@ class TelegramAdminBot:
                         "callback_data": "menu:toggle_mode",
                     }
                 ],
+                [
+                    {
+                        "text": "Настройки и LLM",
+                        "callback_data": "menu:settings",
+                    }
+                ],
+            ]
+        }
+
+    @staticmethod
+    def _settings_keyboard() -> dict:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "Добавить 1 LLM", "callback_data": "menu:llm_setup"},
+                    {"text": "Показать LLM", "callback_data": "menu:llm_show"},
+                ],
+                [
+                    {"text": "Привязать Polymarket", "callback_data": "menu:pm_setup"},
+                    {"text": "Статус Polymarket", "callback_data": "menu:pm_show"},
+                ],
+                [
+                    {"text": "Переключить DRY_RUN", "callback_data": "menu:toggle_dry_run"},
+                    {"text": "Переключить AUTO_EXECUTE", "callback_data": "menu:toggle_mode"},
+                ],
+                [{"text": "Ожидают решения", "callback_data": "menu:pending"}],
             ]
         }
 

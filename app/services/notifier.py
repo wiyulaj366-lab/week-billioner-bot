@@ -46,7 +46,7 @@ class TelegramNotifier:
                 "inline_keyboard": [
                     [
                         {"text": "Отклонить", "callback_data": f"decision:reject:{decision_id}"},
-                        {"text": "Поставить", "callback_data": f"decision:approve:{decision_id}"},
+                        {"text": "Принять ставку", "callback_data": f"decision:approve:{decision_id}"},
                     ]
                 ]
             }

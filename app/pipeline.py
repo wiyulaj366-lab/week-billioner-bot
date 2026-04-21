@@ -1,6 +1,7 @@
 import logging
 
 from app.config import Settings
+from app.models import ExecutionResult
 from app.services.analysis import AnalysisService
 from app.services.decision import DecisionService
 from app.services.execution import ExecutionService
@@ -56,16 +57,18 @@ class TradingPipeline:
                     continue
 
                 decision_state = "skipped"
-                execution = await self.execution.execute(decision)
                 if require_confirmation:
                     decision_state = "pending_approval"
-                    execution = execution.model_copy(
-                        update={
-                            "success": True,
-                            "message": "Ожидает подтверждения в админ-панели.",
-                        }
+                    execution = ExecutionResult(
+                        simulated=True,
+                        success=True,
+                        message="Ожидает подтверждения в админ-панели.",
                     )
                 else:
+                    execution = await self.execution.execute(
+                        decision,
+                        market_id=decision.market.market_id if decision.market else None,
+                    )
                     decision_state = "executed"
 
                 decision_id = await self.storage.store_decision(

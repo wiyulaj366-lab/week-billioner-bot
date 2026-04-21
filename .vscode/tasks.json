@@ -1,0 +1,23 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Visible Terminal Prompt Test",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Write-Host \"TASK VISIBLE TEST\"; Read-Host \"Введите значение в видимом терминале\""
+			],
+			"isBackground": false,
+			"presentation": {
+				"reveal": "always",
+				"focus": true,
+				"panel": "dedicated",
+				"showReuseMessage": false,
+				"clear": false
+			}
+		}
+	]
+}

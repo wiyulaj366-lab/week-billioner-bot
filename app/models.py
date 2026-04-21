@@ -25,6 +25,8 @@ class PolymarketMarket(BaseModel):
     liquidity_usd: float = 0.0
     yes_price: Optional[float] = None
     no_price: Optional[float] = None
+    yes_token_id: Optional[str] = None
+    no_token_id: Optional[str] = None
     end_date: Optional[datetime] = None
 
 

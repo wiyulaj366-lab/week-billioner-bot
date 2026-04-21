@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     user_language: str = "ru"
 
     polymarket_events_url: str = "https://gamma-api.polymarket.com/events"
+    polymarket_clob_host: str = "https://clob.polymarket.com"
+    polymarket_chain_id: int = 137
+    polymarket_signature_type: int = 1
+    polymarket_private_key: str = ""
+    polymarket_funder_address: str = ""
     world_feeds: str = (
         "https://feeds.bbci.co.uk/news/world/rss.xml,"
         "https://rss.nytimes.com/services/xml/rss/nyt/World.xml,"
@@ -52,9 +57,9 @@ class Settings(BaseSettings):
         "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best"
     )
 
-    llm_1_name: str = "ModelA"
+    llm_1_name: str = "ChatGPT 5.3"
     llm_1_base_url: str = ""
-    llm_1_model: str = ""
+    llm_1_model: str = "gpt-5.3"
     llm_1_api_key: str = ""
 
     llm_2_name: str = "ModelB"

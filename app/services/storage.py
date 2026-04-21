@@ -214,7 +214,7 @@ class Storage:
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
                 f"""
-                SELECT id, created_at, event_title, market_question, market_url, action, stake_usd, confidence,
+                  SELECT id, created_at, event_title, event_url, market_question, market_url, action, stake_usd, confidence,
                        decision_state, execution_message
                 FROM decisions
                 WHERE decision_state IN ({placeholders})

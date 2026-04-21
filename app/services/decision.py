@@ -65,11 +65,18 @@ class DecisionService:
             )
 
         action = "BET_YES" if analysis.consensus_side == "YES" else "BET_NO"
-        stake = min(runtime.max_bet_usd, round(runtime.max_bet_usd * analysis.consensus_confidence, 2))
+        is_btc_market = "bitcoin" in market.question.lower() or "btc" in market.question.lower()
+        stake_target = runtime.max_bet_usd * analysis.consensus_confidence
+        if is_btc_market:
+            stake_target *= 1.2
+        stake = min(runtime.max_bet_usd, round(stake_target, 2))
+        rationale = analysis.summary_reasoning[:1000]
+        if is_btc_market:
+            rationale = "[GOLDEN_BTC] " + rationale
         return Decision(
             market=market,
             action=action,
             stake_usd=max(stake, 1.0),
             confidence=analysis.consensus_confidence,
-            rationale=analysis.summary_reasoning[:1000],
+            rationale=rationale,
         )

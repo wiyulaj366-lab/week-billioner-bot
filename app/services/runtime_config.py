@@ -24,6 +24,15 @@ def _to_float(raw: str | float | None, default: float) -> float:
         return default
 
 
+def _to_int(raw: str | int | None, default: int) -> int:
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class RuntimeSnapshot:
     dry_run: bool
@@ -36,6 +45,11 @@ class RuntimeSnapshot:
     user_language: str
     telegram_bot_token: str
     telegram_chat_id: str
+    polymarket_clob_host: str
+    polymarket_chain_id: int
+    polymarket_signature_type: int
+    polymarket_private_key: str
+    polymarket_funder_address: str
     llms: list[LLMConfig]
 
 
@@ -72,6 +86,15 @@ class RuntimeConfigService:
             user_language=str(o.get("USER_LANGUAGE", self.settings.user_language)).strip().lower(),
             telegram_bot_token=o.get("TELEGRAM_BOT_TOKEN", self.settings.telegram_bot_token),
             telegram_chat_id=o.get("TELEGRAM_CHAT_ID", self.settings.telegram_chat_id),
+            polymarket_clob_host=o.get("POLYMARKET_CLOB_HOST", self.settings.polymarket_clob_host),
+            polymarket_chain_id=_to_int(o.get("POLYMARKET_CHAIN_ID"), self.settings.polymarket_chain_id),
+            polymarket_signature_type=_to_int(
+                o.get("POLYMARKET_SIGNATURE_TYPE"), self.settings.polymarket_signature_type
+            ),
+            polymarket_private_key=o.get("POLYMARKET_PRIVATE_KEY", self.settings.polymarket_private_key),
+            polymarket_funder_address=o.get(
+                "POLYMARKET_FUNDER_ADDRESS", self.settings.polymarket_funder_address
+            ),
             llms=llms,
         )
 
@@ -84,14 +107,12 @@ class RuntimeConfigService:
 
     def _build_llm_configs(self, o: dict[str, str]) -> list[LLMConfig]:
         llms: list[LLMConfig] = []
-        for idx in (1, 2, 3):
-            prefix = f"LLM_{idx}_"
-            cfg = LLMConfig(
-                name=o.get(prefix + "NAME", getattr(self.settings, f"llm_{idx}_name")),
-                base_url=o.get(prefix + "BASE_URL", getattr(self.settings, f"llm_{idx}_base_url")),
-                model=o.get(prefix + "MODEL", getattr(self.settings, f"llm_{idx}_model")),
-                api_key=o.get(prefix + "API_KEY", getattr(self.settings, f"llm_{idx}_api_key")),
-            )
-            if cfg.enabled:
-                llms.append(cfg)
+        cfg = LLMConfig(
+            name=o.get("LLM_1_NAME", self.settings.llm_1_name),
+            base_url=o.get("LLM_1_BASE_URL", self.settings.llm_1_base_url),
+            model=o.get("LLM_1_MODEL", self.settings.llm_1_model),
+            api_key=o.get("LLM_1_API_KEY", self.settings.llm_1_api_key),
+        )
+        if cfg.enabled:
+            llms.append(cfg)
         return llms

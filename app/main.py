@@ -61,15 +61,16 @@ async def on_startup() -> None:
     storage = Storage(settings.database_path)
     await storage.init()
     runtime_config = RuntimeConfigService(settings=settings, storage=storage)
+    polymarket_client = PolymarketClient(settings.polymarket_events_url)
 
     ingestion = IngestionService(
         world_client=WorldEventsClient(settings.get_world_feed_list()),
-        polymarket_client=PolymarketClient(settings.polymarket_events_url),
+        polymarket_client=polymarket_client,
         storage=storage,
     )
     analysis = AnalysisService(runtime_config)
     decision = DecisionService(settings, storage, runtime_config)
-    execution = ExecutionService(settings, runtime_config)
+    execution = ExecutionService(settings, runtime_config, polymarket_client)
     notifier = TelegramNotifier(settings, runtime_config)
     admin_bot = TelegramAdminBot(
         settings=settings,
