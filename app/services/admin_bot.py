@@ -223,6 +223,9 @@ class TelegramAdminBot:
         if data == "menu:llm_setup":
             await self._send_message(chat_id, "🤖 Выбери LLM слот для настройки:", reply_markup=self._llm_slot_keyboard("setup"))
             return
+        if data == "menu:llm_clear":
+            await self._send_message(chat_id, "🗑️ Выбери LLM слот для очистки:", reply_markup=self._llm_slot_keyboard("clear"))
+            return
         if data.startswith("menu:llm_setup:"):
             slot = data.rsplit(":", 1)[1]
             if slot not in {"1", "2", "3"}:
@@ -241,6 +244,14 @@ class TelegramAdminBot:
                 "Для отмены нажми: ↩️ Назад",
                 reply_markup={"inline_keyboard": [[{"text": "↩️ Назад", "callback_data": "menu:back_settings"}]]},
             )
+            return
+        if data.startswith("menu:llm_clear:"):
+            slot = data.rsplit(":", 1)[1]
+            if slot not in {"1", "2", "3"}:
+                await self._send_message(chat_id, "Некорректный LLM слот.")
+                return
+            await self._clear_llm_slot(slot)
+            await self._send_message(chat_id, f"LLM_{slot} очищена.")
             return
         if data == "menu:llm_show":
             await self._send_message(chat_id, await self._llm_status_text())
@@ -297,6 +308,7 @@ class TelegramAdminBot:
                 "/panel - кнопки управления\n"
                 "/llm - мастер настройки LLM (слоты 1/2/3)\n"
                 "/llm1, /llm2, /llm3 - настройка конкретного слота\n"
+                "/clearllm1, /clearllm2, /clearllm3 - очистить конкретный слот\n"
                 "/pm - мастер привязки Polymarket\n"
                 "/keys - список изменяемых ключей\n"
                 "/set KEY VALUE - изменить настройку\n"
@@ -324,6 +336,11 @@ class TelegramAdminBot:
                 "model=gpt-5.4-mini\n"
                 "api_key=sk-..."
             )
+
+        if text in {"/clearllm1", "/clearllm2", "/clearllm3"}:
+            slot = text[-1]
+            await self._clear_llm_slot(slot)
+            return f"LLM_{slot} очищена."
 
         if text == "/pm":
             self._chat_state[int(chat_id)] = "awaiting_polymarket"
@@ -798,6 +815,9 @@ class TelegramAdminBot:
                     {"text": "🧾 Показать LLM", "callback_data": "menu:llm_show"},
                 ],
                 [
+                    {"text": "🗑️ Очистить LLM", "callback_data": "menu:llm_clear"},
+                ],
+                [
                     {"text": "🔗 Привязать Polymarket", "callback_data": "menu:pm_setup"},
                     {"text": "🧾 Статус Polymarket", "callback_data": "menu:pm_show"},
                 ],
@@ -822,6 +842,13 @@ class TelegramAdminBot:
                 [{"text": "↩️ Назад", "callback_data": "menu:back_settings"}],
             ]
         }
+
+    async def _clear_llm_slot(self, slot: str) -> None:
+        prefix = f"LLM_{slot}_"
+        await self.runtime_config.set_value(prefix + "NAME", "")
+        await self.runtime_config.set_value(prefix + "BASE_URL", "")
+        await self.runtime_config.set_value(prefix + "MODEL", "")
+        await self.runtime_config.set_value(prefix + "API_KEY", "", is_secret=True)
 
     @staticmethod
     def _mask(value: str) -> str:
