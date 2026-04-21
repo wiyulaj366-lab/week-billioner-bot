@@ -27,6 +27,9 @@ settings = get_settings()
 configure_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 
+# Temporary global pause to stop all bot activity while maintenance is in progress.
+BOT_PAUSED = True
+
 app = FastAPI(title="week-billioner-bot", version="0.1.0")
 scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -164,6 +167,10 @@ async def on_startup() -> None:
     # Первичная проверка зависимостей сразу на старте.
     startup_health = await dependency_health.run_checks()
     logger.info("Startup dependency health: %s", startup_health)
+
+    if BOT_PAUSED:
+        logger.warning("BOT_PAUSED=true: scheduler jobs are not started; bot activity is paused.")
+        return
 
     scheduler.add_job(_run_pipeline_job, "interval", seconds=settings.poll_interval_seconds, id="poll-cycle")
     # BTC 5-мин рынки: цикл каждые 4 минуты (240 сек)
